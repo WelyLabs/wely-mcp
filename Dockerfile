@@ -23,7 +23,9 @@ WORKDIR /app
 # Non-root: nothing here writes outside /tmp or binds a privileged port.
 RUN addgroup -S -g 1001 app && adduser -S -u 1001 -G app app
 
-COPY --from=build --chown=app:app /app/target/*.jar app.jar
+# target-maven, not target: the local-isolation profile is active whenever CI is unset, which it
+# always is inside a Docker build. wely-chat copies from the same place, for the same reason.
+COPY --from=build --chown=app:app /app/target-maven/*.jar app.jar
 
 USER app:app
 
