@@ -1,6 +1,7 @@
 package com.calendar.mcp.infrastructure.http.dtos;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * The slice of wely-events' EventResponse this service reads. Unknown fields are ignored, so the
@@ -12,5 +13,8 @@ public record GatewayEventResponse(
         Instant startDate,
         Instant endDate,
         String location,
-        boolean allDay) {
+        boolean allDay,
+        /** Null on a birthday, says the API; an empty list is the same thing to us. */
+        List<GatewayFriendGoingResponse> friendsGoing,
+        Integer friendsGoingCount) {
 }

@@ -48,7 +48,7 @@ Both are verified: discovery answers 200 and `/mcp` answers 401 with the challen
 
 | tool | parameters | what it answers |
 |---|---|---|
-| `listMyEvents` | `from`, `to` — ISO-8601 instants, `to` exclusive | the caller's events overlapping the range, soonest first, at most 50 |
+| `listMyEvents` | `from`, `to` — ISO-8601 instants, `to` exclusive | the caller's events overlapping the range, soonest first, at most 50, each with the friends going |
 
 ## Structure
 
@@ -57,8 +57,9 @@ The hexagonal layout of the other services, with MCP as one more inbound adapter
 ```
 com.calendar.mcp/
 ├── domain/
-│   ├── models/EventSummary            what an agent needs to discuss an event
+│   ├── models/EventSummary, Attendee  what an agent needs to discuss an event
 │   ├── ports/EventCatalog             what the domain needs from the outside
+│   ├── ports/UserDirectory            names, which the calendar never returns itself
 │   └── services/MyEventsService       the range rule, soonest first, capped — a POJO
 ├── application/
 │   ├── mcp/CalendarTools              @Tool methods: parse, delegate, format
@@ -66,6 +67,7 @@ com.calendar.mcp/
 │   └── mappers/                       MapStruct, domain → tool answer
 ├── infrastructure/http/
 │   ├── GatewayEventCatalog            the port, over the gateway's REST API
+│   ├── GatewayUserDirectory           names a friend through wely-users
 │   ├── BearerTokenRelay               carries the caller's token
 │   └── dtos, mappers/                 the slice of the API this client reads
 └── configuration/                     beans, security, gateway client
@@ -117,7 +119,11 @@ parameters from theirs. A vague description is a bug, not a cosmetic issue.
   `from`/`to` on `/events/me/subscribed`, and this service passes them. The domain filters a second
   time on purpose: Spring ignores unknown query parameters, so an API version without the range
   would otherwise widen the answer with nothing to show it.
-- **One tool.** `listMyFriends` and `searchEvents` are the natural next ones.
+- **One tool.** `listMyBirthdays` (the calendar keeps birthdays on a separate endpoint, excluded
+  from `/me/subscribed`) and `searchEvents` are the natural next ones.
+- **Naming a friend costs one call each.** `wely-users` has no batch profile endpoint, so names are
+  resolved one id at a time, four at a time, after deduplicating across the answer and after the
+  50-event cap. A friend the caller may not read stays unnamed rather than failing the answer.
 - **Identity has not been exercised against a live Keycloak.** The reactive route makes context
   propagation natural rather than something to bridge by hand, and the failure mode is loud
   (`MCP-TEC-003`, never an anonymous call) — but a real token has not been through it yet.

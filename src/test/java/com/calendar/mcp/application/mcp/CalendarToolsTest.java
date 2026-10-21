@@ -2,8 +2,10 @@ package com.calendar.mcp.application.mcp;
 
 import com.calendar.mcp.application.dtos.EventSummaryResponse;
 import com.calendar.mcp.application.mappers.EventSummaryToolMapperImpl;
+import com.calendar.mcp.domain.models.Attendee;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.domain.services.MyEventsService;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
@@ -12,10 +14,12 @@ import com.calendar.mcp.exception.TechnicalException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,18 +29,22 @@ class CalendarToolsTest {
     private static final String FROM = "2026-10-21T00:00:00Z";
     private static final String TO = "2026-10-22T00:00:00Z";
 
+    /** Camille is the only friend these tests know by name. */
+    private static final UserDirectory NAMES = userId ->
+            "f1".equals(userId) ? Mono.just("Camille Durand") : Mono.empty();
+
     private CalendarTools tools;
 
     private static CalendarTools toolsReturning(EventSummary... events) {
         EventCatalog catalog = (from, to) -> Flux.just(events);
-        return new CalendarTools(new MyEventsService(catalog), new EventSummaryToolMapperImpl());
+        return new CalendarTools(new MyEventsService(catalog, NAMES), new EventSummaryToolMapperImpl());
     }
 
     @BeforeEach
     void setUp() {
         tools = toolsReturning(new EventSummary("e1", "Dinner",
                 Instant.parse("2026-10-21T19:00:00Z"), Instant.parse("2026-10-21T22:00:00Z"),
-                "Niort", false));
+                "Niort", false, List.of(Attendee.unnamed("f1", "CLOSE")), 3));
     }
 
     @Test
@@ -75,13 +83,46 @@ class CalendarToolsTest {
             return Flux.empty();
         };
         CalendarTools recordingTools =
-                new CalendarTools(new MyEventsService(recording), new EventSummaryToolMapperImpl());
+                new CalendarTools(new MyEventsService(recording, NAMES), new EventSummaryToolMapperImpl());
 
         StepVerifier.create(recordingTools.listMyEvents(FROM, TO))
                 .expectNextCount(1)
                 .expectComplete().verify(Duration.ofSeconds(5));
 
         assertThat(asked.get()).isEqualTo(Instant.parse(FROM));
+    }
+
+    @Test
+    void listMyEvents_shouldNameTheFriendsGoing() {
+        StepVerifier.create(tools.listMyEvents(FROM, TO))
+                .assertNext(events -> assertThat(events.getFirst().friendsGoing())
+                        .singleElement()
+                        .satisfies(friend -> {
+                            assertThat(friend.name()).isEqualTo("Camille Durand");
+                            assertThat(friend.closeness()).isEqualTo("CLOSE");
+                        }))
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listMyEvents_shouldKeepTheUncappedCountEvenWhenTheListIsShorter() {
+        StepVerifier.create(tools.listMyEvents(FROM, TO))
+                .assertNext(events -> assertThat(events.getFirst().friendsGoingCount()).isEqualTo(3))
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listMyEvents_shouldLeaveOutAFriendItCouldNotName() {
+        CalendarTools unnamed = toolsReturning(new EventSummary("e2", "Padel",
+                Instant.parse("2026-10-21T10:00:00Z"), null, "Niort", false,
+                List.of(Attendee.unnamed("unknown-id", "FRIEND")), 1));
+
+        StepVerifier.create(unnamed.listMyEvents(FROM, TO))
+                .assertNext(events -> {
+                    assertThat(events.getFirst().friendsGoing()).isEmpty();
+                    assertThat(events.getFirst().friendsGoingCount()).isEqualTo(1);
+                })
+                .expectComplete().verify(Duration.ofSeconds(5));
     }
 
     @Test
@@ -108,7 +149,7 @@ class CalendarToolsTest {
     void listMyEvents_shouldPropagateACatalogFailure() {
         EventCatalog failing = (from, to) -> Flux.error(new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED));
         CalendarTools failingTools =
-                new CalendarTools(new MyEventsService(failing), new EventSummaryToolMapperImpl());
+                new CalendarTools(new MyEventsService(failing, NAMES), new EventSummaryToolMapperImpl());
 
         StepVerifier.create(failingTools.listMyEvents(FROM, TO))
                 .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
@@ -124,7 +165,7 @@ class CalendarToolsTest {
             return Flux.empty();
         };
         CalendarTools lazyTools =
-                new CalendarTools(new MyEventsService(catalog), new EventSummaryToolMapperImpl());
+                new CalendarTools(new MyEventsService(catalog, NAMES), new EventSummaryToolMapperImpl());
 
         lazyTools.listMyEvents(FROM, TO);
 
