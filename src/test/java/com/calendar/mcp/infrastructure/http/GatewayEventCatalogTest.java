@@ -20,6 +20,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class GatewayEventCatalogTest {
 
+    private static final Instant FROM = Instant.parse("2026-10-21T00:00:00Z");
+    private static final Instant TO = Instant.parse("2026-10-22T00:00:00Z");
+
     private static final String ONE_EVENT = """
             [{"id":"e1","title":"Dinner","startDate":"2026-10-21T19:00:00Z",
               "endDate":"2026-10-21T22:00:00Z","location":"Niort","allDay":false,
@@ -45,7 +48,7 @@ class GatewayEventCatalogTest {
     void subscribedEvents_shouldMapWhatTheCalendarReturns() {
         GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.OK, ONE_EVENT)));
 
-        StepVerifier.create(catalog.subscribedEvents())
+        StepVerifier.create(catalog.subscribedEvents(FROM, TO))
                 .assertNext(event -> {
                     assertThat(event.id()).isEqualTo("e1");
                     assertThat(event.title()).isEqualTo("Dinner");
@@ -59,7 +62,7 @@ class GatewayEventCatalogTest {
     void subscribedEvents_shouldIgnoreFieldsItDoesNotRead() {
         GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.OK, ONE_EVENT)));
 
-        StepVerifier.create(catalog.subscribedEvents())
+        StepVerifier.create(catalog.subscribedEvents(FROM, TO))
                 .expectNextCount(1)
                 .verifyComplete();
     }
@@ -72,16 +75,29 @@ class GatewayEventCatalogTest {
             return Mono.just(json(HttpStatus.OK, "[]"));
         });
 
-        StepVerifier.create(catalog.subscribedEvents()).verifyComplete();
+        StepVerifier.create(catalog.subscribedEvents(FROM, TO)).verifyComplete();
 
         assertThat(called.get()).isEqualTo(GatewayEventCatalog.SUBSCRIBED_EVENTS_PATH);
+    }
+
+    @Test
+    void subscribedEvents_shouldSendTheRangeAsQueryParameters() {
+        AtomicReference<String> query = new AtomicReference<>();
+        GatewayEventCatalog catalog = catalogAnswering(request -> {
+            query.set(request.url().getQuery());
+            return Mono.just(json(HttpStatus.OK, "[]"));
+        });
+
+        StepVerifier.create(catalog.subscribedEvents(FROM, TO)).verifyComplete();
+
+        assertThat(query.get()).contains("from=2026-10-21T00:00:00Z").contains("to=2026-10-22T00:00:00Z");
     }
 
     @Test
     void subscribedEvents_shouldCompleteOnAnEmptyCalendar() {
         GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.OK, "[]")));
 
-        StepVerifier.create(catalog.subscribedEvents()).verifyComplete();
+        StepVerifier.create(catalog.subscribedEvents(FROM, TO)).verifyComplete();
     }
 
     @Test
@@ -89,7 +105,7 @@ class GatewayEventCatalogTest {
         GatewayEventCatalog catalog = catalogAnswering(request ->
                 Mono.just(json(HttpStatus.FORBIDDEN, "{\"title\":\"Forbidden\"}")));
 
-        StepVerifier.create(catalog.subscribedEvents())
+        StepVerifier.create(catalog.subscribedEvents(FROM, TO))
                 .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
                         .isEqualTo(TechnicalErrorCode.GATEWAY_REFUSED));
     }
@@ -99,7 +115,7 @@ class GatewayEventCatalogTest {
         GatewayEventCatalog catalog = catalogAnswering(request ->
                 Mono.just(json(HttpStatus.INTERNAL_SERVER_ERROR, "{}")));
 
-        StepVerifier.create(catalog.subscribedEvents())
+        StepVerifier.create(catalog.subscribedEvents(FROM, TO))
                 .verifyError(TechnicalException.class);
     }
 
@@ -108,7 +124,7 @@ class GatewayEventCatalogTest {
         GatewayEventCatalog catalog = catalogAnswering(request ->
                 Mono.error(new IllegalStateException("connection reset")));
 
-        StepVerifier.create(catalog.subscribedEvents())
+        StepVerifier.create(catalog.subscribedEvents(FROM, TO))
                 .verifyErrorSatisfies(error -> assertThat(error).isNotInstanceOf(TechnicalException.class));
     }
 }

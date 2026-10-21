@@ -28,7 +28,7 @@ class MyEventsServiceTest {
     }
 
     private static MyEventsService serviceReturning(EventSummary... events) {
-        EventCatalog catalog = () -> Flux.just(events);
+        EventCatalog catalog = (from, to) -> Flux.just(events);
         return new MyEventsService(catalog);
     }
 
@@ -116,7 +116,7 @@ class MyEventsServiceTest {
 
     @Test
     void myEvents_shouldNotQueryTheCatalogWhenTheRangeIsInvalid() {
-        EventCatalog refusing = () -> Flux.error(new AssertionError("the catalog must not be read"));
+        EventCatalog refusing = (from, to) -> Flux.error(new AssertionError("the catalog must not be read"));
 
         StepVerifier.create(new MyEventsService(refusing).myEvents(TO, FROM))
                 .verifyError(BusinessException.class);
@@ -124,7 +124,7 @@ class MyEventsServiceTest {
 
     @Test
     void myEvents_shouldPropagateACatalogFailure() {
-        EventCatalog failing = () -> Flux.error(new IllegalStateException("gateway down"));
+        EventCatalog failing = (from, to) -> Flux.error(new IllegalStateException("gateway down"));
 
         StepVerifier.create(new MyEventsService(failing).myEvents(FROM, TO))
                 .verifyError(IllegalStateException.class);

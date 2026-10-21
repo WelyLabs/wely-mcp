@@ -6,8 +6,6 @@ import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.domain.services.MyEventsService;
 import com.calendar.mcp.infrastructure.http.GatewayEventCatalog;
 import com.calendar.mcp.infrastructure.http.mappers.GatewayEventMapper;
-import org.springframework.ai.tool.ToolCallbackProvider;
-import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -34,9 +32,8 @@ public class McpApplicationConfig {
         return new CalendarTools(myEventsService, mapper);
     }
 
-    /** What the MCP server publishes. A @Tool method outside this list is invisible to clients. */
-    @Bean
-    public ToolCallbackProvider calendarToolCallbacks(CalendarTools calendarTools) {
-        return MethodToolCallbackProvider.builder().toolObjects(calendarTools).build();
-    }
+    // No ToolCallbackProvider bean: the server's annotation scanner finds the @McpTool methods on
+    // the CalendarTools bean, and the async provider subscribes their Mono. Declaring a
+    // MethodToolCallbackProvider as well would publish the same tool twice, through the blocking
+    // path. The boot log's "Registered tools: 1" is what confirms which one is in play.
 }

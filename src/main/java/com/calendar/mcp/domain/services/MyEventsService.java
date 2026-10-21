@@ -24,12 +24,16 @@ public class MyEventsService {
     /**
      * The caller's events overlapping [from, to), soonest first and capped at {@value #MAX_EVENTS}.
      * An event counts as overlapping as soon as it is not wholly before or wholly after the range.
+     *
+     * <p>The range goes to the catalog *and* is applied here. That is deliberate rather than
+     * redundant: the rule belongs to the domain, and an API version that ignored the parameters
+     * would otherwise widen this answer silently.
      */
     public Flux<EventSummary> myEvents(Instant from, Instant to) {
         if (from == null || to == null || !to.isAfter(from)) {
             return Flux.error(new BusinessException(BusinessErrorCode.TIME_RANGE_INVALID));
         }
-        return eventCatalog.subscribedEvents()
+        return eventCatalog.subscribedEvents(from, to)
                 .filter(event -> overlaps(event, from, to))
                 .sort(Comparator.comparing(EventSummary::startDate))
                 .take(MAX_EVENTS);

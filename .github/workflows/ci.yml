@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: 'maven'
+      - name: Build with Maven
+        run: |
+          chmod +x mvnw
+          ./mvnw -B clean compile
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: 'maven'
+      - name: Run Tests
+        run: |
+          chmod +x mvnw
+          ./mvnw -B test
+
+  # No SonarQube job yet, unlike the other services: this repository has no Sonar project and no
+  # SONAR_TOKEN, and a job that cannot authenticate would fail every run. Add it with the token.
+
+  release:
+    name: Release
+    needs: test
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') &&
+      needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Get lowercase owner
+        id: lower
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        if: github.ref == 'refs/heads/main'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Get next version (dry-run)
+        if: github.ref == 'refs/heads/main'
+        id: version
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          dry_run: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        id: docker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          # Layers are kept between runs: the dependency layer is rebuilt only when the pom changes.
+          cache-from: type=gha,scope=wely-mcp
+          cache-to: type=gha,mode=max,scope=wely-mcp
+          tags: >-
+            ${{ github.ref == 'refs/heads/main' && (
+              steps.version.outputs.new_release_published == 'true' &&
+              format('ghcr.io/{0}/wely-mcp:latest,ghcr.io/{0}/wely-mcp:{1}', steps.lower.outputs.owner, steps.version.outputs.new_release_version) ||
+              format('ghcr.io/{0}/wely-mcp:latest', steps.lower.outputs.owner)
+            ) || format('ghcr.io/{0}/wely-mcp:sha-{1}', steps.lower.outputs.owner, github.sha) }}
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' && steps.version.outputs.new_release_published == 'true' && steps.docker.outcome == 'success'
+        uses: cycjimmy/semantic-release-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    name: Deploy
+    needs: release
+    # Needs INFRA_REPO_TOKEN in this repository's secrets, as the other services have. Without it
+    # the image is still built and pushed to GHCR; only the GitOps tag update is skipped.
+    if: |
+      always() &&
+      needs.release.result == 'success'
+    uses: ./.github/workflows/cd.yml
+    with:
+      image_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || format('sha-{0}', github.sha) }}
+      environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+    secrets: inherit

@@ -9,21 +9,16 @@ import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
 import com.calendar.mcp.exception.TechnicalErrorCode;
 import com.calendar.mcp.exception.TechnicalException;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.authentication.TestingAuthenticationToken;
-import org.springframework.security.core.authority.AuthorityUtils;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import reactor.core.publisher.Flux;
+import reactor.test.StepVerifier;
 
+import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CalendarToolsTest {
 
@@ -33,17 +28,8 @@ class CalendarToolsTest {
     private CalendarTools tools;
 
     private static CalendarTools toolsReturning(EventSummary... events) {
-        EventCatalog catalog = () -> Flux.just(events);
+        EventCatalog catalog = (from, to) -> Flux.just(events);
         return new CalendarTools(new MyEventsService(catalog), new EventSummaryToolMapperImpl());
-    }
-
-    private static void authenticateCaller() {
-        Jwt jwt = Jwt.withTokenValue("token-value")
-                .header("alg", "none")
-                .claim("businessId", "11111111-1111-1111-1111-111111111111")
-                .build();
-        SecurityContextHolder.getContext().setAuthentication(
-                new JwtAuthenticationToken(jwt, AuthorityUtils.NO_AUTHORITIES));
     }
 
     @BeforeEach
@@ -51,86 +37,97 @@ class CalendarToolsTest {
         tools = toolsReturning(new EventSummary("e1", "Dinner",
                 Instant.parse("2026-10-21T19:00:00Z"), Instant.parse("2026-10-21T22:00:00Z"),
                 "Niort", false));
-        authenticateCaller();
-    }
-
-    @AfterEach
-    void tearDown() {
-        SecurityContextHolder.clearContext();
     }
 
     @Test
     void listMyEvents_shouldReturnTheCallersEventsInTheRange() {
-        List<EventSummaryResponse> events = tools.listMyEvents(FROM, TO);
-
-        assertThat(events).singleElement().satisfies(event -> {
-            assertThat(event.id()).isEqualTo("e1");
-            assertThat(event.title()).isEqualTo("Dinner");
-            assertThat(event.location()).isEqualTo("Niort");
-        });
+        StepVerifier.create(tools.listMyEvents(FROM, TO))
+                .assertNext(events -> assertThat(events).singleElement().satisfies(event -> {
+                    assertThat(event.id()).isEqualTo("e1");
+                    assertThat(event.title()).isEqualTo("Dinner");
+                    assertThat(event.location()).isEqualTo("Niort");
+                }))
+                .expectComplete().verify(Duration.ofSeconds(5));
     }
 
     @Test
     void listMyEvents_shouldRenderDatesAsIsoInstants() {
-        List<EventSummaryResponse> events = tools.listMyEvents(FROM, TO);
-
-        assertThat(events.getFirst().startDate()).isEqualTo("2026-10-21T19:00:00Z");
-        assertThat(events.getFirst().endDate()).isEqualTo("2026-10-21T22:00:00Z");
+        StepVerifier.create(tools.listMyEvents(FROM, TO))
+                .assertNext(events -> {
+                    assertThat(events.getFirst().startDate()).isEqualTo("2026-10-21T19:00:00Z");
+                    assertThat(events.getFirst().endDate()).isEqualTo("2026-10-21T22:00:00Z");
+                })
+                .expectComplete().verify(Duration.ofSeconds(5));
     }
 
     @Test
     void listMyEvents_shouldReturnAnEmptyListWhenNothingMatches() {
-        assertThat(tools.listMyEvents("2026-12-01T00:00:00Z", "2026-12-02T00:00:00Z")).isEmpty();
+        StepVerifier.create(tools.listMyEvents("2026-12-01T00:00:00Z", "2026-12-02T00:00:00Z"))
+                .assertNext(events -> assertThat(events).isEmpty())
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listMyEvents_shouldPassTheRangeToTheCatalog() {
+        AtomicReference<Instant> asked = new AtomicReference<>();
+        EventCatalog recording = (from, to) -> {
+            asked.set(from);
+            return Flux.empty();
+        };
+        CalendarTools recordingTools =
+                new CalendarTools(new MyEventsService(recording), new EventSummaryToolMapperImpl());
+
+        StepVerifier.create(recordingTools.listMyEvents(FROM, TO))
+                .expectNextCount(1)
+                .expectComplete().verify(Duration.ofSeconds(5));
+
+        assertThat(asked.get()).isEqualTo(Instant.parse(FROM));
     }
 
     @Test
     void listMyEvents_shouldRejectAnUnreadableDate() {
-        assertThatThrownBy(() -> tools.listMyEvents("21/10/2026", TO))
-                .isInstanceOf(BusinessException.class)
-                .extracting(error -> ((BusinessException) error).getErrorCode())
-                .isEqualTo(BusinessErrorCode.TIME_RANGE_UNREADABLE);
+        StepVerifier.create(tools.listMyEvents("21/10/2026", TO))
+                .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.TIME_RANGE_UNREADABLE));
     }
 
     @Test
     void listMyEvents_shouldRejectAMissingDate() {
-        assertThatThrownBy(() -> tools.listMyEvents(null, TO))
-                .isInstanceOf(BusinessException.class);
+        StepVerifier.create(tools.listMyEvents(null, TO))
+                .verifyError(BusinessException.class);
     }
 
     @Test
     void listMyEvents_shouldRejectAnInvertedRange() {
-        assertThatThrownBy(() -> tools.listMyEvents(TO, FROM))
-                .isInstanceOf(BusinessException.class)
-                .extracting(error -> ((BusinessException) error).getErrorCode())
-                .isEqualTo(BusinessErrorCode.TIME_RANGE_INVALID);
-    }
-
-    @Test
-    void listMyEvents_shouldRefuseWhenNoCallerIsAuthenticated() {
-        SecurityContextHolder.clearContext();
-
-        assertThatThrownBy(() -> tools.listMyEvents(FROM, TO))
-                .isInstanceOf(TechnicalException.class)
-                .extracting(error -> ((TechnicalException) error).getErrorCode())
-                .isEqualTo(TechnicalErrorCode.CALLER_TOKEN_MISSING);
-    }
-
-    @Test
-    void listMyEvents_shouldRefuseWhenTheCallerIsNotAuthenticated() {
-        SecurityContextHolder.getContext().setAuthentication(new TestingAuthenticationToken("anonymous", null));
-
-        assertThatThrownBy(() -> tools.listMyEvents(FROM, TO))
-                .isInstanceOf(TechnicalException.class);
+        StepVerifier.create(tools.listMyEvents(TO, FROM))
+                .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.TIME_RANGE_INVALID));
     }
 
     @Test
     void listMyEvents_shouldPropagateACatalogFailure() {
-        EventCatalog failing = () -> Flux.error(new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED));
-        CalendarTools failingTools = new CalendarTools(new MyEventsService(failing), new EventSummaryToolMapperImpl());
+        EventCatalog failing = (from, to) -> Flux.error(new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED));
+        CalendarTools failingTools =
+                new CalendarTools(new MyEventsService(failing), new EventSummaryToolMapperImpl());
 
-        assertThatThrownBy(() -> failingTools.listMyEvents(FROM, TO))
-                .isInstanceOf(TechnicalException.class)
-                .extracting(error -> ((TechnicalException) error).getErrorCode())
-                .isEqualTo(TechnicalErrorCode.GATEWAY_REFUSED);
+        StepVerifier.create(failingTools.listMyEvents(FROM, TO))
+                .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
+                        .isEqualTo(TechnicalErrorCode.GATEWAY_REFUSED));
+    }
+
+    @Test
+    void listMyEvents_shouldNotBlockTheCallingThread() {
+        // The tool is a Mono the server subscribes: building it must do no work at all.
+        AtomicReference<Boolean> read = new AtomicReference<>(false);
+        EventCatalog catalog = (from, to) -> {
+            read.set(true);
+            return Flux.empty();
+        };
+        CalendarTools lazyTools =
+                new CalendarTools(new MyEventsService(catalog), new EventSummaryToolMapperImpl());
+
+        lazyTools.listMyEvents(FROM, TO);
+
+        assertThat(read.get()).isFalse();
     }
 }

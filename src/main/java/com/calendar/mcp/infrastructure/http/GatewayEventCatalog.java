@@ -10,6 +10,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import reactor.core.publisher.Flux;
 
+import java.time.Instant;
+
 /** Reads the calendar through the gateway, as any other client of the public API would. */
 public class GatewayEventCatalog implements EventCatalog {
 
@@ -25,9 +27,12 @@ public class GatewayEventCatalog implements EventCatalog {
     }
 
     @Override
-    public Flux<EventSummary> subscribedEvents() {
+    public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
         return webClient.get()
-                .uri(SUBSCRIBED_EVENTS_PATH)
+                .uri(builder -> builder.path(SUBSCRIBED_EVENTS_PATH)
+                        .queryParam("from", from)
+                        .queryParam("to", to)
+                        .build())
                 .exchangeToFlux(response -> {
                     if (response.statusCode().isError()) {
                         // The status is all the domain needs: it reacts to "the calendar refused", not to 403 versus 404.
