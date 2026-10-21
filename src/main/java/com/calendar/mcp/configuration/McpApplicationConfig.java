@@ -3,8 +3,10 @@ package com.calendar.mcp.configuration;
 import com.calendar.mcp.application.mappers.EventSummaryToolMapper;
 import com.calendar.mcp.application.mcp.CalendarTools;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.domain.services.MyEventsService;
 import com.calendar.mcp.infrastructure.http.GatewayEventCatalog;
+import com.calendar.mcp.infrastructure.http.GatewayUserDirectory;
 import com.calendar.mcp.infrastructure.http.mappers.GatewayEventMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,8 +25,13 @@ public class McpApplicationConfig {
     }
 
     @Bean
-    public MyEventsService myEventsService(EventCatalog eventCatalog) {
-        return new MyEventsService(eventCatalog);
+    public UserDirectory userDirectory(WebClient gatewayWebClient) {
+        return new GatewayUserDirectory(gatewayWebClient);
+    }
+
+    @Bean
+    public MyEventsService myEventsService(EventCatalog eventCatalog, UserDirectory userDirectory) {
+        return new MyEventsService(eventCatalog, userDirectory);
     }
 
     @Bean

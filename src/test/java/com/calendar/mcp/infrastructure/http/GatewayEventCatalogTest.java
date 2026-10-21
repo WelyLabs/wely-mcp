@@ -26,6 +26,7 @@ class GatewayEventCatalogTest {
     private static final String ONE_EVENT = """
             [{"id":"e1","title":"Dinner","startDate":"2026-10-21T19:00:00Z",
               "endDate":"2026-10-21T22:00:00Z","location":"Niort","allDay":false,
+              "friendsGoing":[{"userId":"f1","closeness":"CLOSE"}],"friendsGoingCount":3,
               "description":"ignored","visibility":"PUBLIC"}]
             """;
 
@@ -54,6 +55,12 @@ class GatewayEventCatalogTest {
                     assertThat(event.title()).isEqualTo("Dinner");
                     assertThat(event.startDate()).isEqualTo(Instant.parse("2026-10-21T19:00:00Z"));
                     assertThat(event.location()).isEqualTo("Niort");
+                    assertThat(event.friendsGoing()).singleElement().satisfies(friend -> {
+                        assertThat(friend.userId()).isEqualTo("f1");
+                        assertThat(friend.closeness()).isEqualTo("CLOSE");
+                        assertThat(friend.isNamed()).isFalse();
+                    });
+                    assertThat(event.friendsGoingCount()).isEqualTo(3);
                 })
                 .verifyComplete();
     }

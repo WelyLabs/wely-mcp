@@ -1,16 +1,20 @@
 package com.calendar.mcp.domain.services;
 
+import com.calendar.mcp.domain.models.Attendee;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,16 +24,18 @@ class MyEventsServiceTest {
     private static final Instant FROM = Instant.parse("2026-10-21T00:00:00Z");
     private static final Instant TO = Instant.parse("2026-10-22T00:00:00Z");
 
+    private static final UserDirectory NO_NAMES = userId -> Mono.empty();
+
     private static EventSummary event(String id, String start, String end) {
         return new EventSummary(id, "title-" + id,
                 start == null ? null : Instant.parse(start),
                 end == null ? null : Instant.parse(end),
-                "somewhere", false);
+                "somewhere", false, List.of(), 0);
     }
 
     private static MyEventsService serviceReturning(EventSummary... events) {
         EventCatalog catalog = (from, to) -> Flux.just(events);
-        return new MyEventsService(catalog);
+        return new MyEventsService(catalog, NO_NAMES);
     }
 
     @Test
@@ -102,6 +108,59 @@ class MyEventsServiceTest {
     }
 
     @Test
+    void myEvents_shouldLookUpEachFriendOnceAcrossEvents() {
+        EventSummary first = new EventSummary("e1", "one", Instant.parse("2026-10-21T09:00:00Z"), null,
+                "here", false, List.of(Attendee.unnamed("f1", "CLOSE")), 1);
+        EventSummary second = new EventSummary("e2", "two", Instant.parse("2026-10-21T18:00:00Z"), null,
+                "here", false, List.of(Attendee.unnamed("f1", "CLOSE")), 1);
+        AtomicInteger lookups = new AtomicInteger();
+        UserDirectory counting = userId -> {
+            lookups.incrementAndGet();
+            return Mono.just("Camille");
+        };
+
+        StepVerifier.create(new MyEventsService((from, to) -> Flux.just(first, second), counting)
+                        .myEvents(FROM, TO))
+                .expectNextCount(2)
+                .verifyComplete();
+
+        assertThat(lookups.get()).isEqualTo(1);
+    }
+
+    @Test
+    void myEvents_shouldNotLookUpFriendsOfEventsTheCapDropped() {
+        EventSummary[] many = IntStream.range(0, MyEventsService.MAX_EVENTS + 5)
+                .mapToObj(index -> new EventSummary("e" + index, "t", Instant.parse("2026-10-21T10:00:00Z"), null,
+                        "here", false, List.of(Attendee.unnamed("f" + index, "FRIEND")), 1))
+                .toArray(EventSummary[]::new);
+        AtomicInteger lookups = new AtomicInteger();
+        UserDirectory counting = userId -> {
+            lookups.incrementAndGet();
+            return Mono.just("someone");
+        };
+
+        StepVerifier.create(new MyEventsService((from, to) -> Flux.just(many), counting).myEvents(FROM, TO))
+                .expectNextCount(MyEventsService.MAX_EVENTS)
+                .verifyComplete();
+
+        assertThat(lookups.get()).isEqualTo(MyEventsService.MAX_EVENTS);
+    }
+
+    @Test
+    void myEvents_shouldStillAnswerWhenNobodyCanBeNamed() {
+        EventSummary event = new EventSummary("e1", "one", Instant.parse("2026-10-21T09:00:00Z"), null,
+                "here", false, List.of(Attendee.unnamed("f1", "CLOSE")), 1);
+
+        StepVerifier.create(new MyEventsService((from, to) -> Flux.just(event), NO_NAMES).myEvents(FROM, TO))
+                .assertNext(answered -> {
+                    assertThat(answered.friendsGoing()).singleElement()
+                            .satisfies(friend -> assertThat(friend.isNamed()).isFalse());
+                    assertThat(answered.friendsGoingCount()).isEqualTo(1);
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void myEvents_shouldRejectWhenTheEndIsNotAfterTheStart() {
         StepVerifier.create(serviceReturning().myEvents(TO, FROM))
                 .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
@@ -118,7 +177,7 @@ class MyEventsServiceTest {
     void myEvents_shouldNotQueryTheCatalogWhenTheRangeIsInvalid() {
         EventCatalog refusing = (from, to) -> Flux.error(new AssertionError("the catalog must not be read"));
 
-        StepVerifier.create(new MyEventsService(refusing).myEvents(TO, FROM))
+        StepVerifier.create(new MyEventsService(refusing, NO_NAMES).myEvents(TO, FROM))
                 .verifyError(BusinessException.class);
     }
 
@@ -126,7 +185,7 @@ class MyEventsServiceTest {
     void myEvents_shouldPropagateACatalogFailure() {
         EventCatalog failing = (from, to) -> Flux.error(new IllegalStateException("gateway down"));
 
-        StepVerifier.create(new MyEventsService(failing).myEvents(FROM, TO))
+        StepVerifier.create(new MyEventsService(failing, NO_NAMES).myEvents(FROM, TO))
                 .verifyError(IllegalStateException.class);
     }
 

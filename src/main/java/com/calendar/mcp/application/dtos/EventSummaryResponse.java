@@ -1,5 +1,7 @@
 package com.calendar.mcp.application.dtos;
 
+import java.util.List;
+
 /**
  * What the tool hands back to the model. Dates are ISO-8601 strings on purpose: a model reads and
  * compares them without help, where an epoch number would need explaining.
@@ -10,5 +12,9 @@ public record EventSummaryResponse(
         String startDate,
         String endDate,
         String location,
-        boolean allDay) {
+        boolean allDay,
+        /** The caller's friends going, closest first, at most five. Empty when none or unknown. */
+        List<AttendeeResponse> friendsGoing,
+        /** How many go in all, so "and 7 others" stays sayable even though the list is capped. */
+        int friendsGoingCount) {
 }
