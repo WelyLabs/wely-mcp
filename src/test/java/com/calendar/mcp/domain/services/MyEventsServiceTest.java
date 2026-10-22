@@ -38,6 +38,11 @@ class MyEventsServiceTest {
         public Mono<EventSummary> create(NewEvent event) {
             return Mono.error(new AssertionError("listing must not create anything"));
         }
+
+        @Override
+        public Mono<Void> invite(String eventId, String userId) {
+            return Mono.error(new AssertionError("this test does not invite anyone"));
+        }
     }
 
     private static EventSummary event(String id, String start, String end) {

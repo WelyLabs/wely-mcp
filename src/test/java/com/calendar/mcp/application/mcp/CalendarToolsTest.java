@@ -2,12 +2,17 @@ package com.calendar.mcp.application.mcp;
 
 import com.calendar.mcp.application.dtos.EventSummaryResponse;
 import com.calendar.mcp.application.mappers.EventSummaryToolMapperImpl;
+import com.calendar.mcp.application.mappers.FriendToolMapperImpl;
 import com.calendar.mcp.domain.models.Attendee;
+import com.calendar.mcp.domain.models.Friend;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.domain.services.EventCreationService;
+import com.calendar.mcp.domain.services.EventInvitationService;
+import com.calendar.mcp.domain.services.FriendsService;
 import com.calendar.mcp.domain.services.MyEventsService;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
@@ -47,6 +52,11 @@ class CalendarToolsTest {
         public Mono<EventSummary> create(NewEvent event) {
             return Mono.error(new AssertionError("listing must not create anything"));
         }
+
+        @Override
+        public Mono<Void> invite(String eventId, String userId) {
+            return Mono.empty();
+        }
     }
 
     /** Records the range it was asked for. */
@@ -61,6 +71,11 @@ class CalendarToolsTest {
         public Mono<EventSummary> create(NewEvent event) {
             return Mono.empty();
         }
+
+        @Override
+        public Mono<Void> invite(String eventId, String userId) {
+            return Mono.empty();
+        }
     }
 
     /** Says whether it was read at all. */
@@ -73,6 +88,11 @@ class CalendarToolsTest {
 
         @Override
         public Mono<EventSummary> create(NewEvent event) {
+            return Mono.empty();
+        }
+
+        @Override
+        public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
         }
     }
@@ -90,18 +110,34 @@ class CalendarToolsTest {
             return Mono.just(new EventSummary("new-id", event.title(), event.startDate(), event.endDate(),
                     event.location(), event.allDay(), List.of(), 0));
         }
+
+        @Override
+        public Mono<Void> invite(String eventId, String userId) {
+            return Mono.empty();
+        }
+    }
+
+    /** Camille is this test's only friend, and the only handle invitations can resolve. */
+    private static final SocialGraph ONE_FRIEND = () -> Flux.just(new Friend("f1", "camille", 1234, null, "CLOSE"));
+
+    private static CalendarTools tools(EventCatalog catalog) {
+        return tools(catalog, ONE_FRIEND);
+    }
+
+    private static CalendarTools tools(EventCatalog catalog, SocialGraph graph) {
+        FriendsService friends = new FriendsService(graph, NAMES);
+        return new CalendarTools(new MyEventsService(catalog, NAMES), new EventCreationService(catalog), friends,
+                new EventInvitationService(catalog, friends), new EventSummaryToolMapperImpl(),
+                new FriendToolMapperImpl());
     }
 
     private static CalendarTools toolsCreatingInto(AtomicReference<NewEvent> created) {
-        WritingCatalog catalog = new WritingCatalog(created);
-        return new CalendarTools(new MyEventsService(catalog, NAMES), new EventCreationService(catalog),
-                new EventSummaryToolMapperImpl());
+        return tools(new WritingCatalog(created));
     }
 
     private static CalendarTools toolsReturning(EventSummary... events) {
         EventCatalog catalog = new ReadOnlyCatalog(Flux.just(events));
-        return new CalendarTools(new MyEventsService(catalog, NAMES),
-                new EventCreationService(catalog), new EventSummaryToolMapperImpl());
+        return tools(catalog);
     }
 
     @BeforeEach
@@ -144,8 +180,7 @@ class CalendarToolsTest {
         AtomicReference<Instant> asked = new AtomicReference<>();
         EventCatalog recording = new RecordingCatalog(asked);
         CalendarTools recordingTools =
-                new CalendarTools(new MyEventsService(recording, NAMES), new EventCreationService(recording),
-                        new EventSummaryToolMapperImpl());
+                tools(recording);
 
         StepVerifier.create(recordingTools.listMyEvents(FROM, TO))
                 .expectNextCount(1)
@@ -185,6 +220,73 @@ class CalendarToolsTest {
                     assertThat(events.getFirst().friendsGoingCount()).isEqualTo(1);
                 })
                 .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listMyFriends_shouldAnswerTheFriendsWithTheirHandle() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).listMyFriends())
+                .assertNext(friends -> assertThat(friends).singleElement().satisfies(friend -> {
+                    assertThat(friend.handle()).isEqualTo("camille#1234");
+                    assertThat(friend.closeness()).isEqualTo("CLOSE");
+                }))
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listMyFriends_shouldNameAFriendTheDirectoryKnows() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).listMyFriends())
+                .assertNext(friends -> assertThat(friends.getFirst().name()).isEqualTo("Camille Durand"))
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listMyFriends_shouldFallBackToTheHandleAsAName() {
+        SocialGraph unnamed = () -> Flux.just(new Friend("unknown", "zoe", 42, null, "FRIEND"));
+
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty()), unnamed).listMyFriends())
+                .assertNext(friends -> assertThat(friends.getFirst().name()).isEqualTo("zoe#42"))
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listMyFriends_shouldAnswerAnEmptyListForSomeoneWithNoFriends() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty()), Flux::empty).listMyFriends())
+                .assertNext(friends -> assertThat(friends).isEmpty())
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void inviteToEvent_shouldInviteAFriendByHandle() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).inviteToEvent("e1", List.of("camille#1234")))
+                .assertNext(outcomes -> assertThat(outcomes).singleElement().satisfies(outcome -> {
+                    assertThat(outcome.friend()).isEqualTo("camille#1234");
+                    assertThat(outcome.invited()).isTrue();
+                }))
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void inviteToEvent_shouldReportSomeoneWhoIsNotAFriendWithoutFailing() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).inviteToEvent("e1", List.of("stranger#9")))
+                .assertNext(outcomes -> {
+                    assertThat(outcomes.getFirst().invited()).isFalse();
+                    assertThat(outcomes.getFirst().reason()).isEqualTo("not among your friends");
+                })
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void inviteToEvent_shouldRejectAMissingEventId() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).inviteToEvent(null, List.of("camille#1234")))
+                .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.EVENT_ID_REQUIRED));
+    }
+
+    @Test
+    void inviteToEvent_shouldRejectAnEmptyGuestList() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).inviteToEvent("e1", List.of()))
+                .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.NOBODY_TO_INVITE));
     }
 
     @Test
@@ -296,8 +398,7 @@ class CalendarToolsTest {
     void listMyEvents_shouldPropagateACatalogFailure() {
         EventCatalog failing =
                 new ReadOnlyCatalog(Flux.error(new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)));
-        CalendarTools failingTools = new CalendarTools(new MyEventsService(failing, NAMES),
-                new EventCreationService(failing), new EventSummaryToolMapperImpl());
+        CalendarTools failingTools = tools(failing);
 
         StepVerifier.create(failingTools.listMyEvents(FROM, TO))
                 .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
@@ -309,8 +410,7 @@ class CalendarToolsTest {
         // The tool is a Mono the server subscribes: building it must do no work at all.
         AtomicReference<Boolean> read = new AtomicReference<>(false);
         EventCatalog catalog = new MarkingCatalog(read);
-        CalendarTools lazyTools = new CalendarTools(new MyEventsService(catalog, NAMES),
-                new EventCreationService(catalog), new EventSummaryToolMapperImpl());
+        CalendarTools lazyTools = tools(catalog);
 
         lazyTools.listMyEvents(FROM, TO);
 

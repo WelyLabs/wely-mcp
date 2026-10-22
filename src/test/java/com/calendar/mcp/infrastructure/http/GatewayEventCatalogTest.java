@@ -140,6 +140,29 @@ class GatewayEventCatalogTest {
     }
 
     @Test
+    void invite_shouldPostTheFriendToTheInvitationsRouteOfThatEvent() {
+        AtomicReference<String> path = new AtomicReference<>();
+        GatewayEventCatalog catalog = catalogAnswering(request -> {
+            path.set(request.url().getPath());
+            return Mono.just(ClientResponse.create(HttpStatus.NO_CONTENT).build());
+        });
+
+        StepVerifier.create(catalog.invite("event-7", "u1")).verifyComplete();
+
+        assertThat(path.get()).isEqualTo("/api/v1/events-service/events/event-7/invitations");
+    }
+
+    @Test
+    void invite_shouldTranslateARefusalIntoATechnicalFailure() {
+        GatewayEventCatalog catalog = catalogAnswering(request ->
+                Mono.just(json(HttpStatus.CONFLICT, "{\"title\":\"Already taking part\"}")));
+
+        StepVerifier.create(catalog.invite("event-7", "u1"))
+                .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
+                        .isEqualTo(TechnicalErrorCode.GATEWAY_REFUSED));
+    }
+
+    @Test
     void subscribedEvents_shouldTranslateARefusalIntoATechnicalFailure() {
         GatewayEventCatalog catalog = catalogAnswering(request ->
                 Mono.just(json(HttpStatus.FORBIDDEN, "{\"title\":\"Forbidden\"}")));

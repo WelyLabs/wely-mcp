@@ -1,9 +1,14 @@
 package com.calendar.mcp.application.mcp;
 
 import com.calendar.mcp.application.dtos.EventSummaryResponse;
+import com.calendar.mcp.application.dtos.FriendResponse;
+import com.calendar.mcp.application.dtos.InvitationResponse;
 import com.calendar.mcp.application.mappers.EventSummaryToolMapper;
+import com.calendar.mcp.application.mappers.FriendToolMapper;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.services.EventCreationService;
+import com.calendar.mcp.domain.services.EventInvitationService;
+import com.calendar.mcp.domain.services.FriendsService;
 import com.calendar.mcp.domain.services.MyEventsService;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
@@ -27,13 +32,20 @@ public class CalendarTools {
 
     private final MyEventsService myEventsService;
     private final EventCreationService eventCreationService;
+    private final FriendsService friendsService;
+    private final EventInvitationService eventInvitationService;
     private final EventSummaryToolMapper mapper;
+    private final FriendToolMapper friendMapper;
 
     public CalendarTools(MyEventsService myEventsService, EventCreationService eventCreationService,
-                         EventSummaryToolMapper mapper) {
+                         FriendsService friendsService, EventInvitationService eventInvitationService,
+                         EventSummaryToolMapper mapper, FriendToolMapper friendMapper) {
         this.myEventsService = myEventsService;
         this.eventCreationService = eventCreationService;
+        this.friendsService = friendsService;
+        this.eventInvitationService = eventInvitationService;
         this.mapper = mapper;
+        this.friendMapper = friendMapper;
     }
 
     /**
@@ -91,6 +103,38 @@ public class CalendarTools {
                                 Boolean.TRUE.equals(allDay))))
                 .flatMap(eventCreationService::create)
                 .map(mapper::toResponse);
+    }
+
+    /** No parameters at all: the caller is the token, and there is nothing to narrow. */
+    @McpTool(name = "listMyFriends",
+             description = "List the authenticated user's friends, closest first, with the handle to use when "
+                         + "inviting them to an event. Accepted friendships only, not pending requests.",
+             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false,
+                                                   idempotentHint = true, openWorldHint = true))
+    public Mono<List<FriendResponse>> listMyFriends() {
+        return friendsService.friends()
+                .map(friendMapper::toResponse)
+                .collectList();
+    }
+
+    /**
+     * Takes handles rather than ids, and resolves them against the caller's own friends: a model
+     * cannot invite someone they are not friends with, because it has no way to name them.
+     */
+    @McpTool(name = "inviteToEvent",
+             description = "Invite friends to an event the authenticated user organizes. Give the event id from "
+                         + "createEvent or listMyEvents, and the friends' handles from listMyFriends. Answers one "
+                         + "line per friend, so a refusal does not hide the invitations that went out.",
+             annotations = @McpTool.McpAnnotations(readOnlyHint = false, destructiveHint = false,
+                                                   idempotentHint = true, openWorldHint = true))
+    public Mono<List<InvitationResponse>> inviteToEvent(
+            @McpToolParam(description = "The event's id, as createEvent or listMyEvents answered it")
+            String eventId,
+            @McpToolParam(description = "The friends to invite, by the handle listMyFriends gave, e.g. camille#1234")
+            List<String> friends) {
+
+        return eventInvitationService.invite(eventId, friends)
+                .map(invitations -> invitations.stream().map(friendMapper::toResponse).toList());
     }
 
     /** A model writes dates as text, and gets them wrong: say so in a way it can act on. */

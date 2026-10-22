@@ -33,6 +33,11 @@ class EventCreationServiceTest {
             return Mono.just(new EventSummary("new-id", event.title(), event.startDate(), event.endDate(),
                     event.location(), event.allDay(), List.of(), 0));
         }
+
+        @Override
+        public Mono<Void> invite(String eventId, String userId) {
+            return Mono.error(new AssertionError("this test does not invite anyone"));
+        }
     }
 
     private static NewEvent dinner(String title, String location) {
@@ -121,6 +126,11 @@ class EventCreationServiceTest {
             @Override
             public Mono<EventSummary> create(NewEvent event) {
                 return Mono.error(new IllegalStateException("refused"));
+            }
+
+            @Override
+            public Mono<Void> invite(String eventId, String userId) {
+                return Mono.error(new AssertionError("this test does not invite anyone"));
             }
         };
 

@@ -18,4 +18,7 @@ public interface EventCatalog {
 
     /** Creates the event on the caller's calendar and answers it as stored. */
     Mono<EventSummary> create(NewEvent event);
+
+    /** Invites one friend to an event the caller organizes. */
+    Mono<Void> invite(String eventId, String userId);
 }

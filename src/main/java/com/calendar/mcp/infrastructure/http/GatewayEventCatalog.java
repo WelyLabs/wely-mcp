@@ -6,6 +6,7 @@ import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.exception.TechnicalErrorCode;
 import com.calendar.mcp.exception.TechnicalException;
 import com.calendar.mcp.infrastructure.http.dtos.GatewayEventRequest;
+import com.calendar.mcp.infrastructure.http.dtos.GatewayInvitationRequest;
 import com.calendar.mcp.infrastructure.http.dtos.GatewayEventResponse;
 import com.calendar.mcp.infrastructure.http.mappers.GatewayEventMapper;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -23,6 +24,9 @@ public class GatewayEventCatalog implements EventCatalog {
 
     /** Same route without the suffix: POST creates, the organizer being whoever the token names. */
     static final String EVENTS_PATH = "/api/v1/events-service/events";
+
+    /** One invitee per call, as the calendar takes them. */
+    static final String INVITATIONS_PATH = "/api/v1/events-service/events/{eventId}/invitations";
 
     private final WebClient webClient;
     private final GatewayEventMapper mapper;
@@ -70,6 +74,24 @@ public class GatewayEventCatalog implements EventCatalog {
                     return response.bodyToMono(GatewayEventResponse.class);
                 })
                 .map(mapper::toDomain)
+                .onErrorMap(WebClientRequestException.class, cause ->
+                        new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
+    }
+
+    @Override
+    public Mono<Void> invite(String eventId, String userId) {
+        return webClient.post()
+                .uri(INVITATIONS_PATH, eventId)
+                .bodyValue(new GatewayInvitationRequest(userId))
+                .exchangeToMono(response -> {
+                    if (response.statusCode().isError()) {
+                        // 403 for someone else's event, 409 when they already take part: the caller
+                        // is told which friend it was, by the service that knows the handle.
+                        return response.releaseBody()
+                                .then(Mono.error(new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)));
+                    }
+                    return response.releaseBody();
+                })
                 .onErrorMap(WebClientRequestException.class, cause ->
                         new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
     }

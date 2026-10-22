@@ -1,12 +1,17 @@
 package com.calendar.mcp.configuration;
 
 import com.calendar.mcp.application.mappers.EventSummaryToolMapper;
+import com.calendar.mcp.application.mappers.FriendToolMapper;
 import com.calendar.mcp.application.mcp.CalendarTools;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.domain.services.EventCreationService;
+import com.calendar.mcp.domain.services.EventInvitationService;
+import com.calendar.mcp.domain.services.FriendsService;
 import com.calendar.mcp.domain.services.MyEventsService;
 import com.calendar.mcp.infrastructure.http.GatewayEventCatalog;
+import com.calendar.mcp.infrastructure.http.GatewaySocialGraph;
 import com.calendar.mcp.infrastructure.http.GatewayUserDirectory;
 import com.calendar.mcp.infrastructure.http.mappers.GatewayEventMapper;
 import org.springframework.context.annotation.Bean;
@@ -41,9 +46,26 @@ public class McpApplicationConfig {
     }
 
     @Bean
+    public SocialGraph socialGraph(WebClient gatewayWebClient) {
+        return new GatewaySocialGraph(gatewayWebClient);
+    }
+
+    @Bean
+    public FriendsService friendsService(SocialGraph socialGraph, UserDirectory userDirectory) {
+        return new FriendsService(socialGraph, userDirectory);
+    }
+
+    @Bean
+    public EventInvitationService eventInvitationService(EventCatalog eventCatalog, FriendsService friendsService) {
+        return new EventInvitationService(eventCatalog, friendsService);
+    }
+
+    @Bean
     public CalendarTools calendarTools(MyEventsService myEventsService, EventCreationService eventCreationService,
-                                       EventSummaryToolMapper mapper) {
-        return new CalendarTools(myEventsService, eventCreationService, mapper);
+                                       FriendsService friendsService, EventInvitationService eventInvitationService,
+                                       EventSummaryToolMapper mapper, FriendToolMapper friendMapper) {
+        return new CalendarTools(myEventsService, eventCreationService, friendsService, eventInvitationService,
+                mapper, friendMapper);
     }
 
     // No ToolCallbackProvider bean: the server's annotation scanner finds the @McpTool methods on
