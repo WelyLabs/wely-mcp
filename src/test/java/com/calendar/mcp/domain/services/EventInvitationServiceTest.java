@@ -1,5 +1,6 @@
 package com.calendar.mcp.domain.services;
 
+import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.models.Friend;
 import com.calendar.mcp.domain.models.Invitation;
@@ -22,9 +23,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class EventInvitationServiceTest {
 
-    private static final SocialGraph TWO_FRIENDS = () -> Flux.just(
+    /** Knows the caller's friends, and names nobody else. */
+    private record Circle(Flux<Friend> mine) implements SocialGraph {
+        @Override
+        public Flux<Friend> friends() {
+            return mine;
+        }
+
+        @Override
+        public Mono<Friend> person(String userId) {
+            return Mono.empty();
+        }
+    }
+
+
+    private static final SocialGraph TWO_FRIENDS = new Circle(Flux.just(
             new Friend("u1", "camille", 1234, null, "CLOSE"),
-            new Friend("u2", "hugo", 5678, null, "FRIEND"));
+            new Friend("u2", "hugo", 5678, null, "FRIEND")));
 
     /** Records who was invited, in order, and can be told to refuse one of them. */
     private record InvitingCatalog(List<String> invited, String refuses) implements EventCatalog {
@@ -45,6 +60,21 @@ class EventInvitationServiceTest {
             }
             invited.add(userId);
             return Mono.empty();
+        }
+
+        @Override
+        public Mono<Attendance> attendanceOf(String eventId) {
+            return Mono.just(new Attendance(false, List.of()));
+        }
+
+        @Override
+        public Mono<Void> join(String eventId) {
+            return Mono.error(new AssertionError("this test does not join anything"));
+        }
+
+        @Override
+        public Mono<Void> answerRequest(String eventId, String userId, boolean accept) {
+            return Mono.error(new AssertionError("this test answers no request"));
         }
     }
 

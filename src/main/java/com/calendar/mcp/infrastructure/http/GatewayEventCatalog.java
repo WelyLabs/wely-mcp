@@ -1,5 +1,6 @@
 package com.calendar.mcp.infrastructure.http;
 
+import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
@@ -8,6 +9,7 @@ import com.calendar.mcp.exception.TechnicalException;
 import com.calendar.mcp.infrastructure.http.dtos.GatewayEventRequest;
 import com.calendar.mcp.infrastructure.http.dtos.GatewayInvitationRequest;
 import com.calendar.mcp.infrastructure.http.dtos.GatewayEventResponse;
+import com.calendar.mcp.infrastructure.http.dtos.GatewayParticipantsResponse;
 import com.calendar.mcp.infrastructure.http.mappers.GatewayEventMapper;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
@@ -27,6 +29,15 @@ public class GatewayEventCatalog implements EventCatalog {
 
     /** One invitee per call, as the calendar takes them. */
     static final String INVITATIONS_PATH = "/api/v1/events-service/events/{eventId}/invitations";
+
+    /** Who takes part and who is waiting, as the caller is allowed to see it. */
+    static final String PARTICIPANTS_PATH = "/api/v1/events-service/events/{eventId}/participants";
+
+    /** Joining and leaving are the same call: the domain decides which it means. */
+    static final String SUBSCRIBE_PATH = "/api/v1/events-service/events/{eventId}/subscribe";
+
+    /** The organizer's answer to one asker: POST accepts, DELETE declines. */
+    static final String REQUEST_PATH = "/api/v1/events-service/events/{eventId}/requests/{userId}";
 
     private final WebClient webClient;
     private final GatewayEventMapper mapper;
@@ -92,6 +103,48 @@ public class GatewayEventCatalog implements EventCatalog {
                     }
                     return response.releaseBody();
                 })
+                .onErrorMap(WebClientRequestException.class, cause ->
+                        new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
+    }
+
+    @Override
+    public Mono<Attendance> attendanceOf(String eventId) {
+        return webClient.get()
+                .uri(PARTICIPANTS_PATH, eventId)
+                .exchangeToMono(response -> {
+                    if (response.statusCode().isError()) {
+                        return response.releaseBody()
+                                .then(Mono.<GatewayParticipantsResponse>error(
+                                        new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)));
+                    }
+                    return response.bodyToMono(GatewayParticipantsResponse.class);
+                })
+                .map(participants -> new Attendance(participants.takingPart(), participants.requestedIds()))
+                .onErrorMap(WebClientRequestException.class, cause ->
+                        new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
+    }
+
+    /** The calendar's own endpoint is a toggle; the domain reads where it stands before calling it. */
+    @Override
+    public Mono<Void> join(String eventId) {
+        return webClient.post()
+                .uri(SUBSCRIBE_PATH, eventId)
+                .exchangeToMono(response -> response.statusCode().isError()
+                        ? response.releaseBody().then(Mono.error(
+                                new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)))
+                        : response.releaseBody())
+                .onErrorMap(WebClientRequestException.class, cause ->
+                        new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
+    }
+
+    @Override
+    public Mono<Void> answerRequest(String eventId, String userId, boolean accept) {
+        return (accept ? webClient.post() : webClient.delete())
+                .uri(REQUEST_PATH, eventId, userId)
+                .exchangeToMono(response -> response.statusCode().isError()
+                        ? response.releaseBody().then(Mono.error(
+                                new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)))
+                        : response.releaseBody())
                 .onErrorMap(WebClientRequestException.class, cause ->
                         new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
     }
