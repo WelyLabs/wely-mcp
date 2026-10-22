@@ -5,6 +5,7 @@ import com.calendar.mcp.domain.models.Friend;
 import com.calendar.mcp.domain.models.Invitation;
 import com.calendar.mcp.domain.models.JoinOutcome;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
@@ -18,10 +19,12 @@ public class EventAttendanceService {
     static final int NAME_LOOKUP_CONCURRENCY = 4;
 
     private final EventCatalog eventCatalog;
+    private final EventWriter eventWriter;
     private final SocialGraph socialGraph;
 
-    public EventAttendanceService(EventCatalog eventCatalog, SocialGraph socialGraph) {
+    public EventAttendanceService(EventCatalog eventCatalog, EventWriter eventWriter, SocialGraph socialGraph) {
         this.eventCatalog = eventCatalog;
+        this.eventWriter = eventWriter;
         this.socialGraph = socialGraph;
     }
 
@@ -38,7 +41,7 @@ public class EventAttendanceService {
             if (standing.hasAsked()) {
                 return Mono.just(JoinOutcome.ALREADY_REQUESTED);
             }
-            return eventCatalog.join(eventId)
+            return eventWriter.join(eventId)
                     .then(attendance(eventId))
                     .map(after -> after.takingPart() ? JoinOutcome.JOINED : JoinOutcome.REQUESTED);
         });
@@ -63,7 +66,7 @@ public class EventAttendanceService {
         return pendingRequests(eventId)
                 .filter(asker -> wanted.equalsIgnoreCase(asker.handle()) || wanted.equalsIgnoreCase(asker.userName()))
                 .next()
-                .flatMap(asker -> eventCatalog.answerRequest(eventId, asker.userId(), accept)
+                .flatMap(asker -> eventWriter.answerRequest(eventId, asker.userId(), accept)
                         .thenReturn(Invitation.sent(asker.handle())))
                 .defaultIfEmpty(Invitation.refused(wanted, "nobody is waiting on this event with that handle"))
                 .onErrorResume(cause -> Mono.just(Invitation.refused(wanted, "the calendar refused the answer")));

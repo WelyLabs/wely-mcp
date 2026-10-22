@@ -6,6 +6,7 @@ import com.calendar.mcp.domain.models.Friend;
 import com.calendar.mcp.domain.models.Invitation;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.exception.BusinessErrorCode;
@@ -42,7 +43,7 @@ class EventInvitationServiceTest {
             new Friend("u2", "hugo", 5678, null, "FRIEND")));
 
     /** Records who was invited, in order, and can be told to refuse one of them. */
-    private record InvitingCatalog(List<String> invited, String refuses) implements EventCatalog {
+    private record InvitingCatalog(List<String> invited, String refuses) implements EventCatalog, EventWriter {
         @Override
         public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
             return Flux.error(new AssertionError("inviting must not read the calendar"));

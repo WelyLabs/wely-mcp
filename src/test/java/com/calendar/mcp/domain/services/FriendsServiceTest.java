@@ -103,6 +103,34 @@ class FriendsServiceTest {
     }
 
     @Test
+    void friends_shouldCapWhatItReturns() {
+        Friend[] many = java.util.stream.IntStream.range(0, FriendsService.MAX_FRIENDS + 25)
+                .mapToObj(index -> new Friend("u" + index, "friend" + index, 1000 + index, null, "FRIEND"))
+                .toArray(Friend[]::new);
+
+        StepVerifier.create(serviceWith(NO_NAMES, many).friends())
+                .expectNextCount(FriendsService.MAX_FRIENDS)
+                .verifyComplete();
+    }
+
+    @Test
+    void friends_shouldNotLookUpNamesBeyondTheCap() {
+        Friend[] many = java.util.stream.IntStream.range(0, FriendsService.MAX_FRIENDS + 25)
+                .mapToObj(index -> new Friend("u" + index, "friend" + index, 1000 + index, null, "FRIEND"))
+                .toArray(Friend[]::new);
+        java.util.concurrent.atomic.AtomicInteger lookups = new java.util.concurrent.atomic.AtomicInteger();
+
+        StepVerifier.create(serviceWith(userId -> {
+                    lookups.incrementAndGet();
+                    return Mono.empty();
+                }, many).friends())
+                .expectNextCount(FriendsService.MAX_FRIENDS)
+                .verifyComplete();
+
+        assertThat(lookups.get()).isEqualTo(FriendsService.MAX_FRIENDS);
+    }
+
+    @Test
     void byHandle_shouldFindTheFriendThatHandleNames() {
         StepVerifier.create(serviceWith(NO_NAMES, friend("u1", "camille", "CLOSE")).byHandle("camille#1002"))
                 .assertNext(friend -> assertThat(friend.userId()).isEqualTo("u1"))

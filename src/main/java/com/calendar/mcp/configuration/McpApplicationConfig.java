@@ -4,6 +4,7 @@ import com.calendar.mcp.application.mappers.EventSummaryToolMapper;
 import com.calendar.mcp.application.mappers.FriendToolMapper;
 import com.calendar.mcp.application.mcp.CalendarTools;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.domain.services.EventAttendanceService;
@@ -26,8 +27,13 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Configuration
 public class McpApplicationConfig {
 
+    /**
+     * One bean for the one adapter. It implements both ports, so an EventCatalog or an EventWriter
+     * parameter resolves to it on its own -- republishing it under each interface would leave two
+     * beans of the same concrete type and make injection by that type ambiguous.
+     */
     @Bean
-    public EventCatalog eventCatalog(WebClient gatewayWebClient, GatewayEventMapper mapper) {
+    public GatewayEventCatalog gatewayEventCatalog(WebClient gatewayWebClient, GatewayEventMapper mapper) {
         return new GatewayEventCatalog(gatewayWebClient, mapper);
     }
 
@@ -42,8 +48,8 @@ public class McpApplicationConfig {
     }
 
     @Bean
-    public EventCreationService eventCreationService(EventCatalog eventCatalog) {
-        return new EventCreationService(eventCatalog);
+    public EventCreationService eventCreationService(EventWriter eventWriter) {
+        return new EventCreationService(eventWriter);
     }
 
     @Bean
@@ -57,13 +63,14 @@ public class McpApplicationConfig {
     }
 
     @Bean
-    public EventInvitationService eventInvitationService(EventCatalog eventCatalog, FriendsService friendsService) {
-        return new EventInvitationService(eventCatalog, friendsService);
+    public EventInvitationService eventInvitationService(EventWriter eventWriter, FriendsService friendsService) {
+        return new EventInvitationService(eventWriter, friendsService);
     }
 
     @Bean
-    public EventAttendanceService eventAttendanceService(EventCatalog eventCatalog, SocialGraph socialGraph) {
-        return new EventAttendanceService(eventCatalog, socialGraph);
+    public EventAttendanceService eventAttendanceService(EventCatalog eventCatalog, EventWriter eventWriter,
+                                                        SocialGraph socialGraph) {
+        return new EventAttendanceService(eventCatalog, eventWriter, socialGraph);
     }
 
     @Bean

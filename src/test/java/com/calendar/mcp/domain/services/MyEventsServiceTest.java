@@ -5,6 +5,7 @@ import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
@@ -29,7 +30,7 @@ class MyEventsServiceTest {
     private static final UserDirectory NO_NAMES = userId -> Mono.empty();
 
     /** Reading only: creating is EventCreationService's business, and its own test's. */
-    private record ReadOnlyCatalog(Flux<EventSummary> events) implements EventCatalog {
+    private record ReadOnlyCatalog(Flux<EventSummary> events) implements EventCatalog, EventWriter {
         @Override
         public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
             return events;
