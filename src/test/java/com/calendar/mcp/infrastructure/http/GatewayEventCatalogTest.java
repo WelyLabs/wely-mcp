@@ -189,4 +189,67 @@ class GatewayEventCatalogTest {
         StepVerifier.create(catalog.subscribedEvents(FROM, TO))
                 .verifyErrorSatisfies(error -> assertThat(error).isNotInstanceOf(TechnicalException.class));
     }
+
+    @Test
+    void attendanceOf_shouldReadTakingPartFromTheParticipantList() {
+        GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.OK,
+                "{\"count\":2,\"participantIds\":[\"me\",\"other\"],\"requestedIds\":[\"asker\"]}")));
+
+        StepVerifier.create(catalog.attendanceOf("e1"))
+                .assertNext(attendance -> {
+                    assertThat(attendance.takingPart()).isTrue();
+                    assertThat(attendance.requestedIds()).containsExactly("asker");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void attendanceOf_shouldReadNotTakingPartFromAnEmptyList() {
+        GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.OK,
+                "{\"count\":3,\"participantIds\":[],\"requestedIds\":[]}")));
+
+        StepVerifier.create(catalog.attendanceOf("e1"))
+                .assertNext(attendance -> {
+                    assertThat(attendance.takingPart()).isFalse();
+                    assertThat(attendance.hasAsked()).isFalse();
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void join_shouldPostToTheSubscribeRoute() {
+        AtomicReference<String> path = new AtomicReference<>();
+        GatewayEventCatalog catalog = catalogAnswering(request -> {
+            path.set(request.url().getPath());
+            return Mono.just(ClientResponse.create(HttpStatus.OK).build());
+        });
+
+        StepVerifier.create(catalog.join("e1")).verifyComplete();
+
+        assertThat(path.get()).isEqualTo("/api/v1/events-service/events/e1/subscribe");
+    }
+
+    @Test
+    void answerRequest_shouldPostToAcceptAndDeleteToDecline() {
+        AtomicReference<String> method = new AtomicReference<>();
+        GatewayEventCatalog accepting = catalogAnswering(request -> {
+            method.set(request.method().name());
+            return Mono.just(ClientResponse.create(HttpStatus.OK).build());
+        });
+
+        StepVerifier.create(accepting.answerRequest("e1", "u9", true)).verifyComplete();
+        assertThat(method.get()).isEqualTo("POST");
+
+        StepVerifier.create(accepting.answerRequest("e1", "u9", false)).verifyComplete();
+        assertThat(method.get()).isEqualTo("DELETE");
+    }
+
+    @Test
+    void answerRequest_shouldTranslateARefusalIntoATechnicalFailure() {
+        GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.NOT_FOUND, "{}")));
+
+        StepVerifier.create(catalog.answerRequest("e1", "u9", true))
+                .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
+                        .isEqualTo(TechnicalErrorCode.GATEWAY_REFUSED));
+    }
 }

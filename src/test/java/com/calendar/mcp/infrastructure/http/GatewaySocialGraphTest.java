@@ -84,4 +84,31 @@ class GatewaySocialGraphTest {
                 .expectNext("camille")
                 .verifyComplete();
     }
+
+    @Test
+    void person_shouldNameAnyoneTheDirectoryKnows() {
+        StepVerifier.create(graphAnswering(request -> Mono.just(json(HttpStatus.OK,
+                        "{\"userId\":\"u9\",\"userName\":\"emma\",\"hashtag\":1665}"))).person("u9"))
+                .assertNext(person -> assertThat(person.handle()).isEqualTo("emma#1665"))
+                .verifyComplete();
+    }
+
+    @Test
+    void person_shouldAskTheDirectoryForThatId() {
+        AtomicReference<String> path = new AtomicReference<>();
+        GatewaySocialGraph graph = graphAnswering(request -> {
+            path.set(request.url().getPath());
+            return Mono.just(json(HttpStatus.OK, "{\"userId\":\"u9\",\"userName\":\"emma\"}"));
+        });
+
+        StepVerifier.create(graph.person("u9")).expectNextCount(1).verifyComplete();
+
+        assertThat(path.get()).isEqualTo("/api/v1/social-service/users/u9");
+    }
+
+    @Test
+    void person_shouldStayEmptyForAnIdTheDirectoryRefuses() {
+        StepVerifier.create(graphAnswering(request -> Mono.just(json(HttpStatus.NOT_FOUND, "{}"))).person("u9"))
+                .verifyComplete();
+    }
 }

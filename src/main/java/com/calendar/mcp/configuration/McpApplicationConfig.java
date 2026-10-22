@@ -6,6 +6,7 @@ import com.calendar.mcp.application.mcp.CalendarTools;
 import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.domain.ports.UserDirectory;
+import com.calendar.mcp.domain.services.EventAttendanceService;
 import com.calendar.mcp.domain.services.EventCreationService;
 import com.calendar.mcp.domain.services.EventInvitationService;
 import com.calendar.mcp.domain.services.FriendsService;
@@ -61,11 +62,17 @@ public class McpApplicationConfig {
     }
 
     @Bean
+    public EventAttendanceService eventAttendanceService(EventCatalog eventCatalog, SocialGraph socialGraph) {
+        return new EventAttendanceService(eventCatalog, socialGraph);
+    }
+
+    @Bean
     public CalendarTools calendarTools(MyEventsService myEventsService, EventCreationService eventCreationService,
                                        FriendsService friendsService, EventInvitationService eventInvitationService,
+                                       EventAttendanceService eventAttendanceService,
                                        EventSummaryToolMapper mapper, FriendToolMapper friendMapper) {
         return new CalendarTools(myEventsService, eventCreationService, friendsService, eventInvitationService,
-                mapper, friendMapper);
+                eventAttendanceService, mapper, friendMapper);
     }
 
     // No ToolCallbackProvider bean: the server's annotation scanner finds the @McpTool methods on

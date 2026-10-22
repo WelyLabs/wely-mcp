@@ -6,10 +6,12 @@ import com.calendar.mcp.application.mappers.FriendToolMapperImpl;
 import com.calendar.mcp.domain.models.Attendee;
 import com.calendar.mcp.domain.models.Friend;
 import com.calendar.mcp.domain.models.NewEvent;
+import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.domain.ports.UserDirectory;
+import com.calendar.mcp.domain.services.EventAttendanceService;
 import com.calendar.mcp.domain.services.EventCreationService;
 import com.calendar.mcp.domain.services.EventInvitationService;
 import com.calendar.mcp.domain.services.FriendsService;
@@ -57,6 +59,21 @@ class CalendarToolsTest {
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
         }
+
+        @Override
+        public Mono<Attendance> attendanceOf(String eventId) {
+            return Mono.just(new Attendance(true, List.of()));
+        }
+
+        @Override
+        public Mono<Void> join(String eventId) {
+            return Mono.error(new AssertionError("this test does not join anything"));
+        }
+
+        @Override
+        public Mono<Void> answerRequest(String eventId, String userId, boolean accept) {
+            return Mono.error(new AssertionError("this test answers no request"));
+        }
     }
 
     /** Records the range it was asked for. */
@@ -76,6 +93,21 @@ class CalendarToolsTest {
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
         }
+
+        @Override
+        public Mono<Attendance> attendanceOf(String eventId) {
+            return Mono.just(new Attendance(false, List.of()));
+        }
+
+        @Override
+        public Mono<Void> join(String eventId) {
+            return Mono.error(new AssertionError("this test does not join anything"));
+        }
+
+        @Override
+        public Mono<Void> answerRequest(String eventId, String userId, boolean accept) {
+            return Mono.error(new AssertionError("this test answers no request"));
+        }
     }
 
     /** Says whether it was read at all. */
@@ -94,6 +126,21 @@ class CalendarToolsTest {
         @Override
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
+        }
+
+        @Override
+        public Mono<Attendance> attendanceOf(String eventId) {
+            return Mono.just(new Attendance(false, List.of()));
+        }
+
+        @Override
+        public Mono<Void> join(String eventId) {
+            return Mono.error(new AssertionError("this test does not join anything"));
+        }
+
+        @Override
+        public Mono<Void> answerRequest(String eventId, String userId, boolean accept) {
+            return Mono.error(new AssertionError("this test answers no request"));
         }
     }
 
@@ -115,10 +162,39 @@ class CalendarToolsTest {
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
         }
+
+        @Override
+        public Mono<Attendance> attendanceOf(String eventId) {
+            return Mono.just(new Attendance(false, List.of()));
+        }
+
+        @Override
+        public Mono<Void> join(String eventId) {
+            return Mono.error(new AssertionError("this test does not join anything"));
+        }
+
+        @Override
+        public Mono<Void> answerRequest(String eventId, String userId, boolean accept) {
+            return Mono.error(new AssertionError("this test answers no request"));
+        }
+    }
+
+    /** Knows the caller's friends, and names anyone it was given. */
+    private record Circle(Flux<Friend> mine) implements SocialGraph {
+        @Override
+        public Flux<Friend> friends() {
+            return mine;
+        }
+
+        @Override
+        public Mono<Friend> person(String userId) {
+            return Mono.empty();
+        }
     }
 
     /** Camille is this test's only friend, and the only handle invitations can resolve. */
-    private static final SocialGraph ONE_FRIEND = () -> Flux.just(new Friend("f1", "camille", 1234, null, "CLOSE"));
+    private static final SocialGraph ONE_FRIEND =
+            new Circle(Flux.just(new Friend("f1", "camille", 1234, null, "CLOSE")));
 
     private static CalendarTools tools(EventCatalog catalog) {
         return tools(catalog, ONE_FRIEND);
@@ -127,8 +203,8 @@ class CalendarToolsTest {
     private static CalendarTools tools(EventCatalog catalog, SocialGraph graph) {
         FriendsService friends = new FriendsService(graph, NAMES);
         return new CalendarTools(new MyEventsService(catalog, NAMES), new EventCreationService(catalog), friends,
-                new EventInvitationService(catalog, friends), new EventSummaryToolMapperImpl(),
-                new FriendToolMapperImpl());
+                new EventInvitationService(catalog, friends), new EventAttendanceService(catalog, graph),
+                new EventSummaryToolMapperImpl(), new FriendToolMapperImpl());
     }
 
     private static CalendarTools toolsCreatingInto(AtomicReference<NewEvent> created) {
@@ -223,6 +299,37 @@ class CalendarToolsTest {
     }
 
     @Test
+    void joinEvent_shouldSayWhatHappenedInWords() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).joinEvent("e1"))
+                .expectNext("already taking part")
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listJoinRequests_shouldAnswerNobodyWhenNoneAsked() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).listJoinRequests("e1"))
+                .assertNext(requests -> assertThat(requests).isEmpty())
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void answerJoinRequest_shouldReportAHandleNobodyIsWaitingUnder() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).answerJoinRequest("e1", "zoe#1", true))
+                .assertNext(outcome -> {
+                    assertThat(outcome.invited()).isFalse();
+                    assertThat(outcome.reason()).isEqualTo("nobody is waiting on this event with that handle");
+                })
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void answerJoinRequest_shouldTreatAMissingDecisionAsADecline() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).answerJoinRequest("e1", "zoe#1", null))
+                .expectNextCount(1)
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
     void listMyFriends_shouldAnswerTheFriendsWithTheirHandle() {
         StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).listMyFriends())
                 .assertNext(friends -> assertThat(friends).singleElement().satisfies(friend -> {
@@ -241,7 +348,7 @@ class CalendarToolsTest {
 
     @Test
     void listMyFriends_shouldFallBackToTheHandleAsAName() {
-        SocialGraph unnamed = () -> Flux.just(new Friend("unknown", "zoe", 42, null, "FRIEND"));
+        SocialGraph unnamed = new Circle(Flux.just(new Friend("unknown", "zoe", 42, null, "FRIEND")));
 
         StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty()), unnamed).listMyFriends())
                 .assertNext(friends -> assertThat(friends.getFirst().name()).isEqualTo("zoe#42"))
@@ -250,7 +357,7 @@ class CalendarToolsTest {
 
     @Test
     void listMyFriends_shouldAnswerAnEmptyListForSomeoneWithNoFriends() {
-        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty()), Flux::empty).listMyFriends())
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty()), new Circle(Flux.empty())).listMyFriends())
                 .assertNext(friends -> assertThat(friends).isEmpty())
                 .expectComplete().verify(Duration.ofSeconds(5));
     }

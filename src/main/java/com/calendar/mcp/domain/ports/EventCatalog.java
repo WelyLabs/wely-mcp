@@ -1,5 +1,6 @@
 package com.calendar.mcp.domain.ports;
 
+import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.models.NewEvent;
 import reactor.core.publisher.Flux;
@@ -21,4 +22,13 @@ public interface EventCatalog {
 
     /** Invites one friend to an event the caller organizes. */
     Mono<Void> invite(String eventId, String userId);
+
+    /** Where the caller stands on that event, and who is waiting on it. */
+    Mono<Attendance> attendanceOf(String eventId);
+
+    /** Joins the event, or asks to when the calendar wants the organizer's answer first. */
+    Mono<Void> join(String eventId);
+
+    /** The organizer answers someone who asked to join. */
+    Mono<Void> answerRequest(String eventId, String userId, boolean accept);
 }

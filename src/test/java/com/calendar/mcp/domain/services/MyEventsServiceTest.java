@@ -1,6 +1,7 @@
 package com.calendar.mcp.domain.services;
 
 import com.calendar.mcp.domain.models.Attendee;
+import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
@@ -42,6 +43,21 @@ class MyEventsServiceTest {
         @Override
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.error(new AssertionError("this test does not invite anyone"));
+        }
+
+        @Override
+        public Mono<Attendance> attendanceOf(String eventId) {
+            return Mono.just(new Attendance(false, List.of()));
+        }
+
+        @Override
+        public Mono<Void> join(String eventId) {
+            return Mono.error(new AssertionError("this test does not join anything"));
+        }
+
+        @Override
+        public Mono<Void> answerRequest(String eventId, String userId, boolean accept) {
+            return Mono.error(new AssertionError("this test answers no request"));
         }
     }
 

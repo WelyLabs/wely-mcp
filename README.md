@@ -52,6 +52,9 @@ Both are verified: discovery answers 200 and `/mcp` answers 401 with the challen
 | `createEvent` | `title`, `from`, `to?`, `location`, `allDay`, `description?` | creates an event on the caller's calendar and answers it as stored |
 | `listMyFriends` | — | the caller's accepted friends, closest first, each with the handle to invite them by |
 | `inviteToEvent` | `eventId`, `friends` (handles) | invites them, one outcome per friend |
+| `joinEvent` | `eventId` | joins it, or asks the organizer when a surprise requires it |
+| `listJoinRequests` | `eventId` | who asked to join an event the caller organizes |
+| `answerJoinRequest` | `eventId`, `friend`, `accept` | accepts or declines one asker |
 
 The three write/read tools chain: `listMyFriends` → `createEvent` → `inviteToEvent`, the event id
 coming from the second and the handles from the first.

@@ -5,7 +5,9 @@ import com.calendar.mcp.application.dtos.FriendResponse;
 import com.calendar.mcp.application.dtos.InvitationResponse;
 import com.calendar.mcp.application.mappers.EventSummaryToolMapper;
 import com.calendar.mcp.application.mappers.FriendToolMapper;
+import com.calendar.mcp.domain.models.JoinOutcome;
 import com.calendar.mcp.domain.models.NewEvent;
+import com.calendar.mcp.domain.services.EventAttendanceService;
 import com.calendar.mcp.domain.services.EventCreationService;
 import com.calendar.mcp.domain.services.EventInvitationService;
 import com.calendar.mcp.domain.services.FriendsService;
@@ -34,16 +36,19 @@ public class CalendarTools {
     private final EventCreationService eventCreationService;
     private final FriendsService friendsService;
     private final EventInvitationService eventInvitationService;
+    private final EventAttendanceService eventAttendanceService;
     private final EventSummaryToolMapper mapper;
     private final FriendToolMapper friendMapper;
 
     public CalendarTools(MyEventsService myEventsService, EventCreationService eventCreationService,
                          FriendsService friendsService, EventInvitationService eventInvitationService,
+                         EventAttendanceService eventAttendanceService,
                          EventSummaryToolMapper mapper, FriendToolMapper friendMapper) {
         this.myEventsService = myEventsService;
         this.eventCreationService = eventCreationService;
         this.friendsService = friendsService;
         this.eventInvitationService = eventInvitationService;
+        this.eventAttendanceService = eventAttendanceService;
         this.mapper = mapper;
         this.friendMapper = friendMapper;
     }
@@ -135,6 +140,67 @@ public class CalendarTools {
 
         return eventInvitationService.invite(eventId, friends)
                 .map(invitations -> invitations.stream().map(friendMapper::toResponse).toList());
+    }
+
+    /**
+     * Joining is not a toggle here, although the calendar's own endpoint is one: where the caller
+     * stands is read first, so asking twice never quietly takes them back out.
+     */
+    @McpTool(name = "joinEvent",
+             description = "Join an event the authenticated user was shown. On a surprise party the honoree's close "
+                         + "friends join outright while their other friends are put to the organizer, so the answer "
+                         + "says which happened. Calling it again changes nothing.",
+             annotations = @McpTool.McpAnnotations(readOnlyHint = false, destructiveHint = false,
+                                                   idempotentHint = true, openWorldHint = true))
+    public Mono<String> joinEvent(
+            @McpToolParam(description = "The event's id, as listMyEvents answered it")
+            String eventId) {
+
+        return eventAttendanceService.join(eventId).map(CalendarTools::sayOutcome);
+    }
+
+    /** The organizer's side of a surprise: who is waiting, named through the people directory. */
+    @McpTool(name = "listJoinRequests",
+             description = "List who asked to join an event the authenticated user organizes, with the handle to "
+                         + "answer them by. Only a surprise party produces these: the honoree's plain friends ask "
+                         + "before joining.",
+             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false,
+                                                   idempotentHint = true, openWorldHint = true))
+    public Mono<List<FriendResponse>> listJoinRequests(
+            @McpToolParam(description = "The event's id, as createEvent or listMyEvents answered it")
+            String eventId) {
+
+        return eventAttendanceService.pendingRequests(eventId)
+                .map(friendMapper::toResponse)
+                .collectList();
+    }
+
+    /** Declining is not destructive: the asker may ask again, so the hints say so. */
+    @McpTool(name = "answerJoinRequest",
+             description = "Accept or decline someone who asked to join an event the authenticated user organizes. "
+                         + "Give the handle listJoinRequests gave. Declining is not final: they may ask again.",
+             annotations = @McpTool.McpAnnotations(readOnlyHint = false, destructiveHint = false,
+                                                   idempotentHint = true, openWorldHint = true))
+    public Mono<InvitationResponse> answerJoinRequest(
+            @McpToolParam(description = "The event's id, as listMyEvents answered it")
+            String eventId,
+            @McpToolParam(description = "Who asked, by the handle listJoinRequests gave, e.g. camille#1234")
+            String friend,
+            @McpToolParam(description = "True to accept them, false to decline")
+            Boolean accept) {
+
+        return eventAttendanceService.answer(eventId, friend, Boolean.TRUE.equals(accept))
+                .map(friendMapper::toResponse);
+    }
+
+    /** Said in words rather than as an enum name: the answer is read by a model, then by a person. */
+    private static String sayOutcome(JoinOutcome outcome) {
+        return switch (outcome) {
+            case JOINED -> "joined";
+            case REQUESTED -> "asked the organizer, who has to accept before you take part";
+            case ALREADY_TAKING_PART -> "already taking part";
+            case ALREADY_REQUESTED -> "already asked, still waiting on the organizer";
+        };
     }
 
     /** A model writes dates as text, and gets them wrong: say so in a way it can act on. */
