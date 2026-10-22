@@ -4,6 +4,7 @@ import com.calendar.mcp.application.mappers.EventSummaryToolMapper;
 import com.calendar.mcp.application.mcp.CalendarTools;
 import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.domain.ports.UserDirectory;
+import com.calendar.mcp.domain.services.EventCreationService;
 import com.calendar.mcp.domain.services.MyEventsService;
 import com.calendar.mcp.infrastructure.http.GatewayEventCatalog;
 import com.calendar.mcp.infrastructure.http.GatewayUserDirectory;
@@ -35,8 +36,14 @@ public class McpApplicationConfig {
     }
 
     @Bean
-    public CalendarTools calendarTools(MyEventsService myEventsService, EventSummaryToolMapper mapper) {
-        return new CalendarTools(myEventsService, mapper);
+    public EventCreationService eventCreationService(EventCatalog eventCatalog) {
+        return new EventCreationService(eventCatalog);
+    }
+
+    @Bean
+    public CalendarTools calendarTools(MyEventsService myEventsService, EventCreationService eventCreationService,
+                                       EventSummaryToolMapper mapper) {
+        return new CalendarTools(myEventsService, eventCreationService, mapper);
     }
 
     // No ToolCallbackProvider bean: the server's annotation scanner finds the @McpTool methods on

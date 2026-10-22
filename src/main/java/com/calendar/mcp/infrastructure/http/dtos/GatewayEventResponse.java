@@ -13,7 +13,8 @@ public record GatewayEventResponse(
         Instant startDate,
         Instant endDate,
         String location,
-        boolean allDay,
+        /** Boxed on purpose: a primitive makes Jackson fail outright when the field is absent. */
+        Boolean allDay,
         /** Null on a birthday, says the API; an empty list is the same thing to us. */
         List<GatewayFriendGoingResponse> friendsGoing,
         Integer friendsGoingCount) {
