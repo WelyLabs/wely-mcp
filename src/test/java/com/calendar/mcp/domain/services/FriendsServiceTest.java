@@ -14,6 +14,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class FriendsServiceTest {
 
+    /** A graph that knows the caller's friends and nobody else's circle. */
+    private record OwnFriends(Flux<Friend> mine) implements SocialGraph {
+        @Override
+        public Flux<Friend> friends() {
+            return mine;
+        }
+
+        @Override
+        public Flux<Friend> friendsOf(String userId) {
+            return Flux.empty();
+        }
+    }
+
     private static final UserDirectory NO_NAMES = userId -> Mono.empty();
 
     private static Friend friend(String id, String userName, String closeness) {
@@ -21,7 +34,7 @@ class FriendsServiceTest {
     }
 
     private static FriendsService serviceWith(UserDirectory directory, Friend... friends) {
-        SocialGraph graph = () -> Flux.just(friends);
+        SocialGraph graph = new OwnFriends(Flux.just(friends));
         return new FriendsService(graph, directory);
     }
 
@@ -82,7 +95,7 @@ class FriendsServiceTest {
 
     @Test
     void friends_shouldPropagateAGraphFailure() {
-        SocialGraph failing = () -> Flux.error(new IllegalStateException("social down"));
+        SocialGraph failing = new OwnFriends(Flux.error(new IllegalStateException("social down")));
 
         StepVerifier.create(new FriendsService(failing, NO_NAMES).friends())
                 .verifyError(IllegalStateException.class);

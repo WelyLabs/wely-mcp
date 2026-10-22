@@ -118,19 +118,39 @@ public class CalendarTools {
     }
 
     /**
-     * Takes handles rather than ids, and resolves them against the caller's own friends: a model
-     * cannot invite someone they are not friends with, because it has no way to name them.
+     * The guest list of one event, which is not always the caller's own friends: a surprise is
+     * attended by the honoree's circle. Reading it costs the honoree a disclosure, so it is asked
+     * for an event the caller organizes and nothing else.
+     */
+    @McpTool(name = "listInvitableFriends",
+             description = "List who may be invited to an event the authenticated user organizes, with the handle to "
+                         + "invite them by. On a surprise party these are the honoree's friends, not the user's own, "
+                         + "so call this rather than listMyFriends before inviting anyone to a surprise.",
+             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false,
+                                                   idempotentHint = true, openWorldHint = true))
+    public Mono<List<FriendResponse>> listInvitableFriends(
+            @McpToolParam(description = "The event's id, as createEvent or listMyEvents answered it")
+            String eventId) {
+
+        return eventInvitationService.invitableTo(eventId)
+                .map(friendMapper::toResponse)
+                .collectList();
+    }
+
+    /**
+     * Takes handles rather than ids, and resolves them against the people this event may be invited
+     * to: a model cannot invite someone the calendar would refuse, because it has no way to name them.
      */
     @McpTool(name = "inviteToEvent",
              description = "Invite friends to an event the authenticated user organizes. Give the event id from "
-                         + "createEvent or listMyEvents, and the friends' handles from listMyFriends. Answers one "
+                         + "createEvent or listMyEvents, and the handles from listInvitableFriends. Answers one "
                          + "line per friend, so a refusal does not hide the invitations that went out.",
              annotations = @McpTool.McpAnnotations(readOnlyHint = false, destructiveHint = false,
                                                    idempotentHint = true, openWorldHint = true))
     public Mono<List<InvitationResponse>> inviteToEvent(
             @McpToolParam(description = "The event's id, as createEvent or listMyEvents answered it")
             String eventId,
-            @McpToolParam(description = "The friends to invite, by the handle listMyFriends gave, e.g. camille#1234")
+            @McpToolParam(description = "The friends to invite, by the handle listInvitableFriends gave, e.g. camille#1234")
             List<String> friends) {
 
         return eventInvitationService.invite(eventId, friends)

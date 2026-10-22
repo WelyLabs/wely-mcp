@@ -1,6 +1,7 @@
 package com.calendar.mcp.domain.services;
 
 import com.calendar.mcp.domain.models.EventSummary;
+import com.calendar.mcp.domain.models.GuestPolicy;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.exception.BusinessErrorCode;
@@ -37,6 +38,11 @@ class EventCreationServiceTest {
         @Override
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.error(new AssertionError("this test does not invite anyone"));
+        }
+
+        @Override
+        public Mono<GuestPolicy> guestPolicyOf(String eventId) {
+            return Mono.just(GuestPolicy.organizersFriends());
         }
     }
 
@@ -131,6 +137,11 @@ class EventCreationServiceTest {
             @Override
             public Mono<Void> invite(String eventId, String userId) {
                 return Mono.error(new AssertionError("this test does not invite anyone"));
+            }
+
+            @Override
+            public Mono<GuestPolicy> guestPolicyOf(String eventId) {
+                return Mono.just(GuestPolicy.organizersFriends());
             }
         };
 

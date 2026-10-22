@@ -17,5 +17,9 @@ public record GatewayEventResponse(
         Boolean allDay,
         /** Null on a birthday, says the API; an empty list is the same thing to us. */
         List<GatewayFriendGoingResponse> friendsGoing,
-        Integer friendsGoingCount) {
+        Integer friendsGoingCount,
+        /** STANDARD, SURPRISE or BIRTHDAY; null on a payload that predates it. */
+        String kind,
+        /** Whose birthday a SURPRISE celebrates, null on anything else. */
+        String honoreeId) {
 }

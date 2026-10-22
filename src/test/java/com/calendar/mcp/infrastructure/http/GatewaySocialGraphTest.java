@@ -84,4 +84,39 @@ class GatewaySocialGraphTest {
                 .expectNext("camille")
                 .verifyComplete();
     }
+
+    @Test
+    void friendsOf_shouldMapACloseFriendsCircle() {
+        StepVerifier.create(graphAnswering(request -> Mono.just(json(HttpStatus.OK, ONE_FRIEND))).friendsOf("u2"))
+                .assertNext(friend -> {
+                    assertThat(friend.handle()).isEqualTo("camille#1234");
+                    assertThat(friend.closeness()).isNull();
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void friendsOf_shouldAskThatFriendsCircle() {
+        AtomicReference<String> path = new AtomicReference<>();
+        GatewaySocialGraph graph = graphAnswering(request -> {
+            path.set(request.url().getPath());
+            return Mono.just(json(HttpStatus.OK, "[]"));
+        });
+
+        StepVerifier.create(graph.friendsOf("u2")).verifyComplete();
+
+        assertThat(path.get()).isEqualTo("/api/v1/social-service/relationships/u2/friends");
+    }
+
+    @Test
+    void friendsOf_shouldOfferNobodyWhenTheCallerIsNotCloseEnough() {
+        StepVerifier.create(graphAnswering(request -> Mono.just(json(HttpStatus.FORBIDDEN, "{}"))).friendsOf("u2"))
+                .verifyComplete();
+    }
+
+    @Test
+    void friendsOf_shouldOfferNobodyWhenTheSocialServiceIsDown() {
+        StepVerifier.create(graphAnswering(request -> Mono.error(new IllegalStateException("down"))).friendsOf("u2"))
+                .verifyComplete();
+    }
 }

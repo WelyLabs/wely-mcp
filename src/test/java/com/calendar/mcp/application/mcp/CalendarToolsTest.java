@@ -7,6 +7,7 @@ import com.calendar.mcp.domain.models.Attendee;
 import com.calendar.mcp.domain.models.Friend;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.models.EventSummary;
+import com.calendar.mcp.domain.models.GuestPolicy;
 import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.domain.ports.UserDirectory;
@@ -33,6 +34,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CalendarToolsTest {
 
+    /** A graph that knows the caller's friends and nobody else's circle. */
+    private record OwnFriends(Flux<Friend> mine) implements SocialGraph {
+        @Override
+        public Flux<Friend> friends() {
+            return mine;
+        }
+
+        @Override
+        public Flux<Friend> friendsOf(String userId) {
+            return Flux.empty();
+        }
+    }
+
     private static final String FROM = "2026-10-21T00:00:00Z";
     private static final String TO = "2026-10-22T00:00:00Z";
 
@@ -57,6 +71,11 @@ class CalendarToolsTest {
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
         }
+
+        @Override
+        public Mono<GuestPolicy> guestPolicyOf(String eventId) {
+            return Mono.just(GuestPolicy.organizersFriends());
+        }
     }
 
     /** Records the range it was asked for. */
@@ -76,6 +95,11 @@ class CalendarToolsTest {
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
         }
+
+        @Override
+        public Mono<GuestPolicy> guestPolicyOf(String eventId) {
+            return Mono.just(GuestPolicy.organizersFriends());
+        }
     }
 
     /** Says whether it was read at all. */
@@ -94,6 +118,11 @@ class CalendarToolsTest {
         @Override
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
+        }
+
+        @Override
+        public Mono<GuestPolicy> guestPolicyOf(String eventId) {
+            return Mono.just(GuestPolicy.organizersFriends());
         }
     }
 
@@ -115,10 +144,16 @@ class CalendarToolsTest {
         public Mono<Void> invite(String eventId, String userId) {
             return Mono.empty();
         }
+
+        @Override
+        public Mono<GuestPolicy> guestPolicyOf(String eventId) {
+            return Mono.just(GuestPolicy.organizersFriends());
+        }
     }
 
     /** Camille is this test's only friend, and the only handle invitations can resolve. */
-    private static final SocialGraph ONE_FRIEND = () -> Flux.just(new Friend("f1", "camille", 1234, null, "CLOSE"));
+    private static final SocialGraph ONE_FRIEND =
+            new OwnFriends(Flux.just(new Friend("f1", "camille", 1234, null, "CLOSE")));
 
     private static CalendarTools tools(EventCatalog catalog) {
         return tools(catalog, ONE_FRIEND);
@@ -127,7 +162,7 @@ class CalendarToolsTest {
     private static CalendarTools tools(EventCatalog catalog, SocialGraph graph) {
         FriendsService friends = new FriendsService(graph, NAMES);
         return new CalendarTools(new MyEventsService(catalog, NAMES), new EventCreationService(catalog), friends,
-                new EventInvitationService(catalog, friends), new EventSummaryToolMapperImpl(),
+                new EventInvitationService(catalog, friends, graph), new EventSummaryToolMapperImpl(),
                 new FriendToolMapperImpl());
     }
 
@@ -241,7 +276,7 @@ class CalendarToolsTest {
 
     @Test
     void listMyFriends_shouldFallBackToTheHandleAsAName() {
-        SocialGraph unnamed = () -> Flux.just(new Friend("unknown", "zoe", 42, null, "FRIEND"));
+        SocialGraph unnamed = new OwnFriends(Flux.just(new Friend("unknown", "zoe", 42, null, "FRIEND")));
 
         StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty()), unnamed).listMyFriends())
                 .assertNext(friends -> assertThat(friends.getFirst().name()).isEqualTo("zoe#42"))
@@ -250,9 +285,24 @@ class CalendarToolsTest {
 
     @Test
     void listMyFriends_shouldAnswerAnEmptyListForSomeoneWithNoFriends() {
-        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty()), Flux::empty).listMyFriends())
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty()), new OwnFriends(Flux.empty())).listMyFriends())
                 .assertNext(friends -> assertThat(friends).isEmpty())
                 .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listInvitableFriends_shouldAnswerTheCallersFriends_onAStandardEvent() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).listInvitableFriends("e1"))
+                .assertNext(friends -> assertThat(friends).singleElement()
+                        .satisfies(friend -> assertThat(friend.handle()).isEqualTo("camille#1234")))
+                .expectComplete().verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void listInvitableFriends_shouldRejectAMissingEventId() {
+        StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).listInvitableFriends(null))
+                .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.EVENT_ID_REQUIRED));
     }
 
     @Test
@@ -270,7 +320,7 @@ class CalendarToolsTest {
         StepVerifier.create(tools(new ReadOnlyCatalog(Flux.empty())).inviteToEvent("e1", List.of("stranger#9")))
                 .assertNext(outcomes -> {
                     assertThat(outcomes.getFirst().invited()).isFalse();
-                    assertThat(outcomes.getFirst().reason()).isEqualTo("not among your friends");
+                    assertThat(outcomes.getFirst().reason()).isEqualTo("not among the people who may be invited to this event");
                 })
                 .expectComplete().verify(Duration.ofSeconds(5));
     }

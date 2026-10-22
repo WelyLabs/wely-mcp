@@ -56,8 +56,9 @@ public class McpApplicationConfig {
     }
 
     @Bean
-    public EventInvitationService eventInvitationService(EventCatalog eventCatalog, FriendsService friendsService) {
-        return new EventInvitationService(eventCatalog, friendsService);
+    public EventInvitationService eventInvitationService(EventCatalog eventCatalog, FriendsService friendsService,
+                                                        SocialGraph socialGraph) {
+        return new EventInvitationService(eventCatalog, friendsService, socialGraph);
     }
 
     @Bean

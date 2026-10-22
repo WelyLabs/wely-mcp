@@ -15,6 +15,9 @@ public class GatewaySocialGraph implements SocialGraph {
     /** stripPrefix(2) at the gateway turns this into /social-service/relationships. */
     static final String RELATIONSHIPS_PATH = "/api/v1/social-service/relationships";
 
+    /** A close friend's own circle; 403 for a plain friend, which reads here as "nobody". */
+    static final String CIRCLE_PATH = "/api/v1/social-service/relationships/{userId}/friends";
+
     private final WebClient webClient;
 
     public GatewaySocialGraph(WebClient webClient) {
@@ -37,5 +40,23 @@ public class GatewaySocialGraph implements SocialGraph {
                         friend.closeness()))
                 .onErrorMap(WebClientRequestException.class, cause ->
                         new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
+    }
+
+    /**
+     * Empty rather than an error when the caller is not close enough: the tool then offers nobody,
+     * which is the truth, instead of failing a question that was reasonable to ask.
+     */
+    @Override
+    public Flux<Friend> friendsOf(String userId) {
+        return webClient.get()
+                .uri(CIRCLE_PATH, userId)
+                .exchangeToFlux(response -> {
+                    if (response.statusCode().isError()) {
+                        return response.releaseBody().thenMany(Flux.<GatewayFriendSummaryResponse>empty());
+                    }
+                    return response.bodyToFlux(GatewayFriendSummaryResponse.class);
+                })
+                .map(friend -> new Friend(friend.userId(), friend.userName(), friend.hashtag(), null, null))
+                .onErrorResume(cause -> Flux.empty());
     }
 }

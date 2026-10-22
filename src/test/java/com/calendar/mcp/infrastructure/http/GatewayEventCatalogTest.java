@@ -140,6 +140,49 @@ class GatewayEventCatalogTest {
     }
 
     @Test
+    void guestPolicyOf_shouldNameTheHonoreeOnASurprise() {
+        GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.OK,
+                "{\"id\":\"e1\",\"kind\":\"SURPRISE\",\"honoreeId\":\"u2\"}")));
+
+        StepVerifier.create(catalog.guestPolicyOf("e1"))
+                .assertNext(policy -> {
+                    assertThat(policy.surprise()).isTrue();
+                    assertThat(policy.honoreeId()).isEqualTo("u2");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void guestPolicyOf_shouldFallBackToTheOrganizersFriendsOnAnyOtherKind() {
+        GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.OK,
+                "{\"id\":\"e1\",\"kind\":\"STANDARD\"}")));
+
+        StepVerifier.create(catalog.guestPolicyOf("e1"))
+                .assertNext(policy -> assertThat(policy.namesAnHonoree()).isFalse())
+                .verifyComplete();
+    }
+
+    @Test
+    void guestPolicyOf_shouldFallBackWhenThePayloadHasNoKind() {
+        GatewayEventCatalog catalog = catalogAnswering(request ->
+                Mono.just(json(HttpStatus.OK, "{\"id\":\"e1\"}")));
+
+        StepVerifier.create(catalog.guestPolicyOf("e1"))
+                .assertNext(policy -> assertThat(policy.surprise()).isFalse())
+                .verifyComplete();
+    }
+
+    @Test
+    void guestPolicyOf_shouldTranslateARefusalIntoATechnicalFailure() {
+        GatewayEventCatalog catalog = catalogAnswering(request ->
+                Mono.just(json(HttpStatus.NOT_FOUND, "{}")));
+
+        StepVerifier.create(catalog.guestPolicyOf("e1"))
+                .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
+                        .isEqualTo(TechnicalErrorCode.GATEWAY_REFUSED));
+    }
+
+    @Test
     void invite_shouldPostTheFriendToTheInvitationsRouteOfThatEvent() {
         AtomicReference<String> path = new AtomicReference<>();
         GatewayEventCatalog catalog = catalogAnswering(request -> {

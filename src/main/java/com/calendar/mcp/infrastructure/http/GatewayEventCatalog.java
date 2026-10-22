@@ -1,6 +1,7 @@
 package com.calendar.mcp.infrastructure.http;
 
 import com.calendar.mcp.domain.models.EventSummary;
+import com.calendar.mcp.domain.models.GuestPolicy;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.exception.TechnicalErrorCode;
@@ -27,6 +28,12 @@ public class GatewayEventCatalog implements EventCatalog {
 
     /** One invitee per call, as the calendar takes them. */
     static final String INVITATIONS_PATH = "/api/v1/events-service/events/{eventId}/invitations";
+
+    /** One event, read for the kind and the honoree that decide its guest rule. */
+    static final String EVENT_PATH = "/api/v1/events-service/events/{eventId}";
+
+    /** The one kind whose guests are the honoree's friends rather than the organizer's. */
+    static final String SURPRISE = "SURPRISE";
 
     private final WebClient webClient;
     private final GatewayEventMapper mapper;
@@ -92,6 +99,25 @@ public class GatewayEventCatalog implements EventCatalog {
                     }
                     return response.releaseBody();
                 })
+                .onErrorMap(WebClientRequestException.class, cause ->
+                        new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
+    }
+
+    @Override
+    public Mono<GuestPolicy> guestPolicyOf(String eventId) {
+        return webClient.get()
+                .uri(EVENT_PATH, eventId)
+                .exchangeToMono(response -> {
+                    if (response.statusCode().isError()) {
+                        return response.releaseBody()
+                                .then(Mono.<GatewayEventResponse>error(
+                                        new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)));
+                    }
+                    return response.bodyToMono(GatewayEventResponse.class);
+                })
+                .map(event -> SURPRISE.equals(event.kind())
+                        ? GuestPolicy.honoreesFriends(event.honoreeId())
+                        : GuestPolicy.organizersFriends())
                 .onErrorMap(WebClientRequestException.class, cause ->
                         new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
     }

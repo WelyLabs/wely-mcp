@@ -1,6 +1,7 @@
 package com.calendar.mcp.domain.ports;
 
 import com.calendar.mcp.domain.models.EventSummary;
+import com.calendar.mcp.domain.models.GuestPolicy;
 import com.calendar.mcp.domain.models.NewEvent;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -21,4 +22,7 @@ public interface EventCatalog {
 
     /** Invites one friend to an event the caller organizes. */
     Mono<Void> invite(String eventId, String userId);
+
+    /** What decides who may be invited to that event: its kind, and the honoree on a surprise. */
+    Mono<GuestPolicy> guestPolicyOf(String eventId);
 }

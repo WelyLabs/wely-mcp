@@ -51,10 +51,12 @@ Both are verified: discovery answers 200 and `/mcp` answers 401 with the challen
 | `listMyEvents` | `from`, `to` — ISO-8601 instants, `to` exclusive | the caller's events overlapping the range, soonest first, at most 50, each with the friends going |
 | `createEvent` | `title`, `from`, `to?`, `location`, `allDay`, `description?` | creates an event on the caller's calendar and answers it as stored |
 | `listMyFriends` | — | the caller's accepted friends, closest first, each with the handle to invite them by |
+| `listInvitableFriends` | `eventId` | who may be invited to that event: the honoree's circle on a surprise, the caller's friends otherwise |
 | `inviteToEvent` | `eventId`, `friends` (handles) | invites them, one outcome per friend |
 
-The three write/read tools chain: `listMyFriends` → `createEvent` → `inviteToEvent`, the event id
-coming from the second and the handles from the first.
+The tools chain: `createEvent` → `listInvitableFriends` → `inviteToEvent`, the event id coming from
+the first and the handles from the second. `listMyFriends` answers the user's own circle, which is
+the right list for a standard event but **not** for a surprise.
 
 `createEvent` is the only tool that writes. Three decisions shape it:
 
@@ -137,9 +139,14 @@ parameters from theirs. A vague description is a bug, not a cosmetic issue.
 - **One tool.** `listMyBirthdays` (the calendar keeps birthdays on a separate endpoint, excluded
   from `/me/subscribed`) and `searchEvents` are the natural next ones.
 - **Handles, never user ids.** A friend travels as `userName#hashtag`, and `inviteToEvent` resolves
-  it against the caller's own friends before sending anything — so a model cannot invite someone
-  they are not friends with, because it has no way to name them. Inviting is also not participating:
-  the guest still has to accept.
+  it against the people that event may be invited to — so a model cannot invite someone the calendar
+  would refuse, because it has no way to name them. Inviting is also not participating: the guest
+  still has to accept.
+- **A surprise is attended by the honoree's friends**, which `wely-events` enforces and
+  `listInvitableFriends` mirrors, so the tool offers exactly what the calendar accepts. Those guests
+  are named by their handle alone: they are the honoree's friends, not necessarily the caller's, and
+  their profile is not the caller's to read. Without `wely-social`'s circle endpoint deployed, that
+  list is **empty** rather than wrong.
 - **Naming a friend costs one call each.** `wely-users` has no batch profile endpoint, so names are
   resolved one id at a time, four at a time, after deduplicating across the answer and after the
   50-event cap. A friend the caller may not read stays unnamed rather than failing the answer.
