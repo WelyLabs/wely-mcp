@@ -111,4 +111,12 @@ class GatewaySocialGraphTest {
         StepVerifier.create(graphAnswering(request -> Mono.just(json(HttpStatus.NOT_FOUND, "{}"))).person("u9"))
                 .verifyComplete();
     }
+
+    @Test
+    void person_shouldFailWhenTheDirectoryIsDown() {
+        // A directory that is down must not read as "nobody asked to join".
+        StepVerifier.create(graphAnswering(request -> Mono.just(json(HttpStatus.BAD_GATEWAY, "{}"))).person("u9"))
+                .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
+                        .isEqualTo(TechnicalErrorCode.GATEWAY_REFUSED));
+    }
 }

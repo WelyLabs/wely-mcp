@@ -4,6 +4,7 @@ import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.exception.TechnicalErrorCode;
 import com.calendar.mcp.exception.TechnicalException;
 import com.calendar.mcp.infrastructure.http.dtos.GatewayEventRequest;
@@ -18,8 +19,12 @@ import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 
-/** Reads the calendar through the gateway, as any other client of the public API would. */
-public class GatewayEventCatalog implements EventCatalog {
+/**
+ * Reads and writes the calendar through the gateway, as any other client of the public API would.
+ * One adapter for both ports: it is a single HTTP client, and splitting it would duplicate the
+ * WebClient and the error translation for nothing.
+ */
+public class GatewayEventCatalog implements EventCatalog, EventWriter {
 
     /** stripPrefix(2) at the gateway turns this into /events-service/events/me/subscribed. */
     static final String SUBSCRIBED_EVENTS_PATH = "/api/v1/events-service/events/me/subscribed";

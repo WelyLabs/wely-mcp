@@ -9,6 +9,7 @@ import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.domain.ports.SocialGraph;
 import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.domain.services.EventAttendanceService;
@@ -44,7 +45,7 @@ class CalendarToolsTest {
 
     private CalendarTools tools;
 
-    private record ReadOnlyCatalog(Flux<EventSummary> events) implements EventCatalog {
+    private record ReadOnlyCatalog(Flux<EventSummary> events) implements EventCatalog, EventWriter {
         @Override
         public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
             return events;
@@ -77,7 +78,7 @@ class CalendarToolsTest {
     }
 
     /** Records the range it was asked for. */
-    private record RecordingCatalog(AtomicReference<Instant> asked) implements EventCatalog {
+    private record RecordingCatalog(AtomicReference<Instant> asked) implements EventCatalog, EventWriter {
         @Override
         public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
             asked.set(from);
@@ -111,7 +112,7 @@ class CalendarToolsTest {
     }
 
     /** Says whether it was read at all. */
-    private record MarkingCatalog(AtomicReference<Boolean> read) implements EventCatalog {
+    private record MarkingCatalog(AtomicReference<Boolean> read) implements EventCatalog, EventWriter {
         @Override
         public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
             read.set(true);
@@ -145,7 +146,7 @@ class CalendarToolsTest {
     }
 
     /** Keeps what it was asked to create and answers it back, as the calendar would. */
-    private record WritingCatalog(AtomicReference<NewEvent> created) implements EventCatalog {
+    private record WritingCatalog(AtomicReference<NewEvent> created) implements EventCatalog, EventWriter {
         @Override
         public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
             return Flux.empty();
@@ -196,14 +197,14 @@ class CalendarToolsTest {
     private static final SocialGraph ONE_FRIEND =
             new Circle(Flux.just(new Friend("f1", "camille", 1234, null, "CLOSE")));
 
-    private static CalendarTools tools(EventCatalog catalog) {
+    private static <T extends EventCatalog & EventWriter> CalendarTools tools(T catalog) {
         return tools(catalog, ONE_FRIEND);
     }
 
-    private static CalendarTools tools(EventCatalog catalog, SocialGraph graph) {
+    private static <T extends EventCatalog & EventWriter> CalendarTools tools(T catalog, SocialGraph graph) {
         FriendsService friends = new FriendsService(graph, NAMES);
         return new CalendarTools(new MyEventsService(catalog, NAMES), new EventCreationService(catalog), friends,
-                new EventInvitationService(catalog, friends), new EventAttendanceService(catalog, graph),
+                new EventInvitationService(catalog, friends), new EventAttendanceService(catalog, catalog, graph),
                 new EventSummaryToolMapperImpl(), new FriendToolMapperImpl());
     }
 
@@ -212,8 +213,7 @@ class CalendarToolsTest {
     }
 
     private static CalendarTools toolsReturning(EventSummary... events) {
-        EventCatalog catalog = new ReadOnlyCatalog(Flux.just(events));
-        return tools(catalog);
+        return tools(new ReadOnlyCatalog(Flux.just(events)));
     }
 
     @BeforeEach
@@ -254,7 +254,7 @@ class CalendarToolsTest {
     @Test
     void listMyEvents_shouldPassTheRangeToTheCatalog() {
         AtomicReference<Instant> asked = new AtomicReference<>();
-        EventCatalog recording = new RecordingCatalog(asked);
+        RecordingCatalog recording = new RecordingCatalog(asked);
         CalendarTools recordingTools =
                 tools(recording);
 
@@ -503,7 +503,7 @@ class CalendarToolsTest {
 
     @Test
     void listMyEvents_shouldPropagateACatalogFailure() {
-        EventCatalog failing =
+        ReadOnlyCatalog failing =
                 new ReadOnlyCatalog(Flux.error(new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)));
         CalendarTools failingTools = tools(failing);
 
@@ -516,7 +516,7 @@ class CalendarToolsTest {
     void listMyEvents_shouldNotBlockTheCallingThread() {
         // The tool is a Mono the server subscribes: building it must do no work at all.
         AtomicReference<Boolean> read = new AtomicReference<>(false);
-        EventCatalog catalog = new MarkingCatalog(read);
+        MarkingCatalog catalog = new MarkingCatalog(read);
         CalendarTools lazyTools = tools(catalog);
 
         lazyTools.listMyEvents(FROM, TO);

@@ -14,6 +14,12 @@ public class FriendsService {
     /** Same budget as the event listing: enough to be quick without hammering wely-users. */
     static final int NAME_LOOKUP_CONCURRENCY = 4;
 
+    /**
+     * A tool answer is read by a model, and every friend costs a profile lookup. Past this many the
+     * list stops helping and only costs context -- the same reason the event listing caps at 50.
+     */
+    static final int MAX_FRIENDS = 100;
+
     /** INTIMATE first, then CLOSE, then FRIEND, then anything unknown. */
     private static final Comparator<Friend> CLOSEST_FIRST =
             Comparator.<Friend>comparingInt(friend -> switch (friend.closeness() == null ? "" : friend.closeness()) {
@@ -33,6 +39,7 @@ public class FriendsService {
 
     public Flux<Friend> friends() {
         return socialGraph.friends()
+                .take(MAX_FRIENDS)
                 .flatMap(this::named, NAME_LOOKUP_CONCURRENCY)
                 .sort(CLOSEST_FIRST);
     }

@@ -2,7 +2,7 @@ package com.calendar.mcp.domain.services;
 
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.models.NewEvent;
-import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
 import reactor.core.publisher.Mono;
@@ -10,10 +10,10 @@ import reactor.core.publisher.Mono;
 /** Creates an event, refusing here what the calendar would refuse anyway -- but in words a model can act on. */
 public class EventCreationService {
 
-    private final EventCatalog eventCatalog;
+    private final EventWriter eventWriter;
 
-    public EventCreationService(EventCatalog eventCatalog) {
-        this.eventCatalog = eventCatalog;
+    public EventCreationService(EventWriter eventWriter) {
+        this.eventWriter = eventWriter;
     }
 
     /**
@@ -34,7 +34,7 @@ public class EventCreationService {
         if (event.endDate() != null && event.endDate().isBefore(event.startDate())) {
             return Mono.error(new BusinessException(BusinessErrorCode.END_BEFORE_START));
         }
-        return eventCatalog.create(event.normalised());
+        return eventWriter.create(event.normalised());
     }
 
     private boolean isBlank(String value) {

@@ -43,18 +43,28 @@ public class GatewaySocialGraph implements SocialGraph {
                         new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
     }
 
-    /** Empty rather than an error for an id the directory does not know: the asker stays unnamed. */
+    /**
+     * Empty for an id the directory does not know (4xx): that asker stays unnamed and is left out.
+     * A 5xx or an unreachable gateway is a failure and is reported as one -- a directory that is
+     * down must not read as "nobody asked".
+     */
     @Override
     public Mono<Friend> person(String userId) {
         return webClient.get()
                 .uri(PERSON_PATH, userId)
                 .exchangeToMono(response -> {
-                    if (response.statusCode().isError()) {
+                    if (response.statusCode().is4xxClientError()) {
                         return response.releaseBody().then(Mono.<GatewayFriendSummaryResponse>empty());
+                    }
+                    if (response.statusCode().isError()) {
+                        return response.releaseBody()
+                                .then(Mono.<GatewayFriendSummaryResponse>error(
+                                        new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)));
                     }
                     return response.bodyToMono(GatewayFriendSummaryResponse.class);
                 })
                 .map(person -> new Friend(person.userId(), person.userName(), person.hashtag(), null, null))
-                .onErrorResume(cause -> Mono.empty());
+                .onErrorMap(WebClientRequestException.class, cause ->
+                        new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
     }
 }

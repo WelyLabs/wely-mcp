@@ -4,6 +4,7 @@ import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ class EventCreationServiceTest {
     private static final Instant START = Instant.parse("2026-10-24T18:30:00Z");
 
     /** Keeps whatever it was asked to create, and answers it back as the calendar would. */
-    private record CapturingCatalog(AtomicReference<NewEvent> created) implements EventCatalog {
+    private record CapturingCatalog(AtomicReference<NewEvent> created) implements EventCatalog, EventWriter {
         @Override
         public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
             return Flux.error(new AssertionError("creating must not read the calendar"));
@@ -133,12 +134,7 @@ class EventCreationServiceTest {
 
     @Test
     void create_shouldPropagateAFailureFromTheCalendar() {
-        EventCatalog failing = new EventCatalog() {
-            @Override
-            public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
-                return Flux.empty();
-            }
-
+        EventWriter failing = new EventWriter() {
             @Override
             public Mono<EventSummary> create(NewEvent event) {
                 return Mono.error(new IllegalStateException("refused"));
@@ -147,11 +143,6 @@ class EventCreationServiceTest {
             @Override
             public Mono<Void> invite(String eventId, String userId) {
                 return Mono.error(new AssertionError("this test does not invite anyone"));
-            }
-
-            @Override
-            public Mono<Attendance> attendanceOf(String eventId) {
-                return Mono.just(new Attendance(false, List.of()));
             }
 
             @Override

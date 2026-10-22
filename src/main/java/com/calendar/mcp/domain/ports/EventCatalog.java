@@ -2,13 +2,16 @@ package com.calendar.mcp.domain.ports;
 
 import com.calendar.mcp.domain.models.Attendance;
 import com.calendar.mcp.domain.models.EventSummary;
-import com.calendar.mcp.domain.models.NewEvent;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 
-/** The calendar as this service reads it, on behalf of whoever the current call carries the token of. */
+/**
+ * The calendar as this service reads it, on behalf of whoever the current call carries the token of.
+ * Reading only: what changes the calendar lives in {@link EventWriter}, so a service that merely
+ * answers questions cannot be handed the means to write.
+ */
 public interface EventCatalog {
 
     /**
@@ -17,18 +20,6 @@ public interface EventCatalog {
      */
     Flux<EventSummary> subscribedEvents(Instant from, Instant to);
 
-    /** Creates the event on the caller's calendar and answers it as stored. */
-    Mono<EventSummary> create(NewEvent event);
-
-    /** Invites one friend to an event the caller organizes. */
-    Mono<Void> invite(String eventId, String userId);
-
     /** Where the caller stands on that event, and who is waiting on it. */
     Mono<Attendance> attendanceOf(String eventId);
-
-    /** Joins the event, or asks to when the calendar wants the organizer's answer first. */
-    Mono<Void> join(String eventId);
-
-    /** The organizer answers someone who asked to join. */
-    Mono<Void> answerRequest(String eventId, String userId, boolean accept);
 }

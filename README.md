@@ -145,13 +145,19 @@ parameters from theirs. A vague description is a bug, not a cosmetic issue.
   the guest still has to accept.
 - **Naming a friend costs one call each.** `wely-users` has no batch profile endpoint, so names are
   resolved one id at a time, four at a time, after deduplicating across the answer and after the
-  50-event cap. A friend the caller may not read stays unnamed rather than failing the answer.
+  caps — 50 events, 100 friends. A friend the caller may not read (4xx) stays unnamed; a directory
+  that is **down** (5xx) fails the answer rather than passing for "no name".
 - **Identity has not been exercised against a live Keycloak.** The reactive route makes context
   propagation natural rather than something to bridge by hand, and the failure mode is loud
   (`MCP-TEC-003`, never an anonymous call) — but a real token has not been through it yet.
-- **Audience is not validated.** The token's issuer and signature are, its `aud` is not. Set
-  `spring.security.oauth2.resourceserver.jwt.audiences` once the Keycloak client has an audience
-  mapper, so a token minted for another service cannot be replayed here.
+- **Audience is not validated yet.** The property is in place but empty: a real token carries **no
+  `aud` claim at all** (checked 2026-10-23), even though wely-identity's realm export declares an
+  audience mapper on `business-scope` — the live dev realm has drifted from the export. Enabling
+  validation before the claim exists would answer 401 to every call. Order: fix the realm, watch the
+  claim appear in a fresh token, then set `JWT_AUDIENCES`.
+- **No Testcontainers**, but `McpApplicationTest` boots the whole context and speaks MCP to it over
+  the deployed filter chain — which is what the 404 on `/mcp` needed, and what caught an ambiguous
+  bean the unit tests could not see.
 - **No Sonar job in CI**, unlike the other services: this repository has no Sonar project and no
   `SONAR_TOKEN`, and a job that cannot authenticate would fail every run.
 - **The CD job needs `INFRA_REPO_TOKEN`** in this repository's secrets, as the other services have.

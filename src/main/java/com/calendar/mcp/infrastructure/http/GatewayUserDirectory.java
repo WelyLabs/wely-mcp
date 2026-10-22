@@ -1,8 +1,11 @@
 package com.calendar.mcp.infrastructure.http;
 
 import com.calendar.mcp.domain.ports.UserDirectory;
+import com.calendar.mcp.exception.TechnicalErrorCode;
+import com.calendar.mcp.exception.TechnicalException;
 import com.calendar.mcp.infrastructure.http.dtos.GatewayFriendProfileResponse;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import reactor.core.publisher.Mono;
 
 /** Names a user through the gateway, with the caller's own token: a profile they may not read stays unnamed. */
@@ -22,14 +25,22 @@ public class GatewayUserDirectory implements UserDirectory {
         return webClient.get()
                 .uri(PROFILE_PATH, userId)
                 .exchangeToMono(response -> {
-                    if (response.statusCode().isError()) {
-                        // 403 for a profile that is not the caller's to read, 404 for a stale id,
-                        // 502 when wely-users is down: none of them is worth failing the answer for.
+                    // 403 for a profile that is not the caller's to read and 404 for a stale id are
+                    // answers, not failures: that person simply stays unnamed. A 5xx is a broken
+                    // dependency and says so -- swallowing it would make wely-users being down
+                    // indistinguishable from a friend without a profile.
+                    if (response.statusCode().is4xxClientError()) {
                         return response.releaseBody().then(Mono.empty());
+                    }
+                    if (response.statusCode().isError()) {
+                        return response.releaseBody()
+                                .then(Mono.<GatewayFriendProfileResponse>error(
+                                        new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)));
                     }
                     return response.bodyToMono(GatewayFriendProfileResponse.class);
                 })
                 .mapNotNull(GatewayFriendProfileResponse::displayName)
-                .onErrorResume(cause -> Mono.empty());
+                .onErrorMap(WebClientRequestException.class, cause ->
+                        new TechnicalException(TechnicalErrorCode.GATEWAY_UNREACHABLE, cause));
     }
 }

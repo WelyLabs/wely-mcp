@@ -2,7 +2,7 @@ package com.calendar.mcp.domain.services;
 
 import com.calendar.mcp.domain.models.Friend;
 import com.calendar.mcp.domain.models.Invitation;
-import com.calendar.mcp.domain.ports.EventCatalog;
+import com.calendar.mcp.domain.ports.EventWriter;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
 import reactor.core.publisher.Flux;
@@ -16,11 +16,11 @@ public class EventInvitationService {
     /** Invitations go out one at a time: the calendar takes one invitee per call, and order is the model's. */
     static final int INVITE_CONCURRENCY = 1;
 
-    private final EventCatalog eventCatalog;
+    private final EventWriter eventWriter;
     private final FriendsService friendsService;
 
-    public EventInvitationService(EventCatalog eventCatalog, FriendsService friendsService) {
-        this.eventCatalog = eventCatalog;
+    public EventInvitationService(EventWriter eventWriter, FriendsService friendsService) {
+        this.eventWriter = eventWriter;
         this.friendsService = friendsService;
     }
 
@@ -49,7 +49,7 @@ public class EventInvitationService {
     }
 
     private Mono<Invitation> sendTo(String eventId, Friend friend) {
-        return eventCatalog.invite(eventId, friend.userId())
+        return eventWriter.invite(eventId, friend.userId())
                 .thenReturn(Invitation.sent(friend.handle()));
     }
 }
