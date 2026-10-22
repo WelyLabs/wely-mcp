@@ -2,6 +2,7 @@ package com.calendar.mcp.domain.services;
 
 import com.calendar.mcp.domain.models.Attendee;
 import com.calendar.mcp.domain.models.EventSummary;
+import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.domain.ports.UserDirectory;
 import com.calendar.mcp.exception.BusinessErrorCode;
@@ -26,6 +27,19 @@ class MyEventsServiceTest {
 
     private static final UserDirectory NO_NAMES = userId -> Mono.empty();
 
+    /** Reading only: creating is EventCreationService's business, and its own test's. */
+    private record ReadOnlyCatalog(Flux<EventSummary> events) implements EventCatalog {
+        @Override
+        public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
+            return events;
+        }
+
+        @Override
+        public Mono<EventSummary> create(NewEvent event) {
+            return Mono.error(new AssertionError("listing must not create anything"));
+        }
+    }
+
     private static EventSummary event(String id, String start, String end) {
         return new EventSummary(id, "title-" + id,
                 start == null ? null : Instant.parse(start),
@@ -34,7 +48,7 @@ class MyEventsServiceTest {
     }
 
     private static MyEventsService serviceReturning(EventSummary... events) {
-        EventCatalog catalog = (from, to) -> Flux.just(events);
+        EventCatalog catalog = new ReadOnlyCatalog(Flux.just(events));
         return new MyEventsService(catalog, NO_NAMES);
     }
 
@@ -119,7 +133,7 @@ class MyEventsServiceTest {
             return Mono.just("Camille");
         };
 
-        StepVerifier.create(new MyEventsService((from, to) -> Flux.just(first, second), counting)
+        StepVerifier.create(new MyEventsService(new ReadOnlyCatalog(Flux.just(first, second)), counting)
                         .myEvents(FROM, TO))
                 .expectNextCount(2)
                 .verifyComplete();
@@ -139,7 +153,7 @@ class MyEventsServiceTest {
             return Mono.just("someone");
         };
 
-        StepVerifier.create(new MyEventsService((from, to) -> Flux.just(many), counting).myEvents(FROM, TO))
+        StepVerifier.create(new MyEventsService(new ReadOnlyCatalog(Flux.just(many)), counting).myEvents(FROM, TO))
                 .expectNextCount(MyEventsService.MAX_EVENTS)
                 .verifyComplete();
 
@@ -151,7 +165,7 @@ class MyEventsServiceTest {
         EventSummary event = new EventSummary("e1", "one", Instant.parse("2026-10-21T09:00:00Z"), null,
                 "here", false, List.of(Attendee.unnamed("f1", "CLOSE")), 1);
 
-        StepVerifier.create(new MyEventsService((from, to) -> Flux.just(event), NO_NAMES).myEvents(FROM, TO))
+        StepVerifier.create(new MyEventsService(new ReadOnlyCatalog(Flux.just(event)), NO_NAMES).myEvents(FROM, TO))
                 .assertNext(answered -> {
                     assertThat(answered.friendsGoing()).singleElement()
                             .satisfies(friend -> assertThat(friend.isNamed()).isFalse());
@@ -175,7 +189,7 @@ class MyEventsServiceTest {
 
     @Test
     void myEvents_shouldNotQueryTheCatalogWhenTheRangeIsInvalid() {
-        EventCatalog refusing = (from, to) -> Flux.error(new AssertionError("the catalog must not be read"));
+        EventCatalog refusing = new ReadOnlyCatalog(Flux.error(new AssertionError("the catalog must not be read")));
 
         StepVerifier.create(new MyEventsService(refusing, NO_NAMES).myEvents(TO, FROM))
                 .verifyError(BusinessException.class);
@@ -183,7 +197,7 @@ class MyEventsServiceTest {
 
     @Test
     void myEvents_shouldPropagateACatalogFailure() {
-        EventCatalog failing = (from, to) -> Flux.error(new IllegalStateException("gateway down"));
+        EventCatalog failing = new ReadOnlyCatalog(Flux.error(new IllegalStateException("gateway down")));
 
         StepVerifier.create(new MyEventsService(failing, NO_NAMES).myEvents(FROM, TO))
                 .verifyError(IllegalStateException.class);

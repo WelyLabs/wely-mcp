@@ -12,6 +12,7 @@ import java.util.List;
 @Mapper(componentModel = "spring")
 public interface GatewayEventMapper {
 
+    @Mapping(target = "allDay", source = "allDay", defaultValue = "false")
     @Mapping(target = "friendsGoing", source = "friendsGoing")
     @Mapping(target = "friendsGoingCount", source = "friendsGoingCount", defaultValue = "0")
     EventSummary toDomain(GatewayEventResponse response);

@@ -1,6 +1,7 @@
 package com.calendar.mcp.infrastructure.http;
 
 import com.calendar.mcp.domain.models.EventSummary;
+import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.exception.TechnicalErrorCode;
 import com.calendar.mcp.exception.TechnicalException;
 import com.calendar.mcp.infrastructure.http.mappers.GatewayEventMapperImpl;
@@ -105,6 +106,37 @@ class GatewayEventCatalogTest {
         GatewayEventCatalog catalog = catalogAnswering(request -> Mono.just(json(HttpStatus.OK, "[]")));
 
         StepVerifier.create(catalog.subscribedEvents(FROM, TO)).verifyComplete();
+    }
+
+    @Test
+    void create_shouldPostToTheEventsRouteAndMapTheAnswer() {
+        AtomicReference<String> path = new AtomicReference<>();
+        AtomicReference<String> method = new AtomicReference<>();
+        GatewayEventCatalog catalog = catalogAnswering(request -> {
+            path.set(request.url().getPath());
+            method.set(request.method().name());
+            return Mono.just(json(HttpStatus.CREATED,
+                    "{\"id\":\"new-id\",\"title\":\"Dîner\",\"startDate\":\"2026-10-24T18:30:00Z\"}"));
+        });
+
+        StepVerifier.create(catalog.create(new NewEvent("Dîner", Instant.parse("2026-10-24T18:30:00Z"), null,
+                        "Niort", null, false)))
+                .assertNext(event -> assertThat(event.id()).isEqualTo("new-id"))
+                .verifyComplete();
+
+        assertThat(method.get()).isEqualTo("POST");
+        assertThat(path.get()).isEqualTo(GatewayEventCatalog.EVENTS_PATH);
+    }
+
+    @Test
+    void create_shouldTranslateARefusalIntoATechnicalFailure() {
+        GatewayEventCatalog catalog = catalogAnswering(request ->
+                Mono.just(json(HttpStatus.BAD_REQUEST, "{\"title\":\"Event in the past\"}")));
+
+        StepVerifier.create(catalog.create(new NewEvent("Dîner", Instant.parse("2020-01-01T10:00:00Z"), null,
+                        "Niort", null, false)))
+                .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
+                        .isEqualTo(TechnicalErrorCode.GATEWAY_REFUSED));
     }
 
     @Test

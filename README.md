@@ -49,6 +49,16 @@ Both are verified: discovery answers 200 and `/mcp` answers 401 with the challen
 | tool | parameters | what it answers |
 |---|---|---|
 | `listMyEvents` | `from`, `to` — ISO-8601 instants, `to` exclusive | the caller's events overlapping the range, soonest first, at most 50, each with the friends going |
+| `createEvent` | `title`, `from`, `to?`, `location`, `allDay`, `description?` | creates an event on the caller's calendar and answers it as stored |
+
+`createEvent` is the only tool that writes. Three decisions shape it:
+
+- **Visibility is not a parameter.** The calendar defaults to FRIENDS, and a model should not be
+  deciding a privacy setting from a sentence.
+- **All-day events are normalised** to whole UTC days (00:00Z to 00:00Z the morning after) before
+  the API sees them, so a model cannot produce a half-day "all-day" event or one off by a day.
+- **Its annotations say what it is**: not read-only, not idempotent, which is what lets a client ask
+  its user before running it. Calling it twice makes two events, and the description says so.
 
 ## Structure
 
@@ -134,5 +144,8 @@ parameters from theirs. A vague description is a bug, not a cosmetic issue.
   `SONAR_TOKEN`, and a job that cannot authenticate would fail every run.
 - **The CD job needs `INFRA_REPO_TOKEN`** in this repository's secrets, as the other services have.
   Without it the image is still built and pushed to GHCR; only the GitOps tag update is skipped.
-- **Write tools are deliberately absent.** Creating or deleting events from an agent needs a
-  confirmation design first.
+- **Only one write, and nothing destructive.** There is no tool to edit, cancel or delete an event:
+  those need a confirmation design of their own, and getting one wrong costs more than a duplicate.
+- **`createEvent` covers the plain case only.** No date poll (`candidateSlots`), no community, no
+  surprise, no map coordinates — each is a second creation mode with its own validation, and a wide
+  tool schema derails a model more often than it helps.

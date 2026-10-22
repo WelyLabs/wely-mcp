@@ -3,9 +3,11 @@ package com.calendar.mcp.application.mcp;
 import com.calendar.mcp.application.dtos.EventSummaryResponse;
 import com.calendar.mcp.application.mappers.EventSummaryToolMapperImpl;
 import com.calendar.mcp.domain.models.Attendee;
+import com.calendar.mcp.domain.models.NewEvent;
 import com.calendar.mcp.domain.models.EventSummary;
 import com.calendar.mcp.domain.ports.EventCatalog;
 import com.calendar.mcp.domain.ports.UserDirectory;
+import com.calendar.mcp.domain.services.EventCreationService;
 import com.calendar.mcp.domain.services.MyEventsService;
 import com.calendar.mcp.exception.BusinessErrorCode;
 import com.calendar.mcp.exception.BusinessException;
@@ -35,9 +37,71 @@ class CalendarToolsTest {
 
     private CalendarTools tools;
 
+    private record ReadOnlyCatalog(Flux<EventSummary> events) implements EventCatalog {
+        @Override
+        public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
+            return events;
+        }
+
+        @Override
+        public Mono<EventSummary> create(NewEvent event) {
+            return Mono.error(new AssertionError("listing must not create anything"));
+        }
+    }
+
+    /** Records the range it was asked for. */
+    private record RecordingCatalog(AtomicReference<Instant> asked) implements EventCatalog {
+        @Override
+        public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
+            asked.set(from);
+            return Flux.empty();
+        }
+
+        @Override
+        public Mono<EventSummary> create(NewEvent event) {
+            return Mono.empty();
+        }
+    }
+
+    /** Says whether it was read at all. */
+    private record MarkingCatalog(AtomicReference<Boolean> read) implements EventCatalog {
+        @Override
+        public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
+            read.set(true);
+            return Flux.empty();
+        }
+
+        @Override
+        public Mono<EventSummary> create(NewEvent event) {
+            return Mono.empty();
+        }
+    }
+
+    /** Keeps what it was asked to create and answers it back, as the calendar would. */
+    private record WritingCatalog(AtomicReference<NewEvent> created) implements EventCatalog {
+        @Override
+        public Flux<EventSummary> subscribedEvents(Instant from, Instant to) {
+            return Flux.empty();
+        }
+
+        @Override
+        public Mono<EventSummary> create(NewEvent event) {
+            created.set(event);
+            return Mono.just(new EventSummary("new-id", event.title(), event.startDate(), event.endDate(),
+                    event.location(), event.allDay(), List.of(), 0));
+        }
+    }
+
+    private static CalendarTools toolsCreatingInto(AtomicReference<NewEvent> created) {
+        WritingCatalog catalog = new WritingCatalog(created);
+        return new CalendarTools(new MyEventsService(catalog, NAMES), new EventCreationService(catalog),
+                new EventSummaryToolMapperImpl());
+    }
+
     private static CalendarTools toolsReturning(EventSummary... events) {
-        EventCatalog catalog = (from, to) -> Flux.just(events);
-        return new CalendarTools(new MyEventsService(catalog, NAMES), new EventSummaryToolMapperImpl());
+        EventCatalog catalog = new ReadOnlyCatalog(Flux.just(events));
+        return new CalendarTools(new MyEventsService(catalog, NAMES),
+                new EventCreationService(catalog), new EventSummaryToolMapperImpl());
     }
 
     @BeforeEach
@@ -78,12 +142,10 @@ class CalendarToolsTest {
     @Test
     void listMyEvents_shouldPassTheRangeToTheCatalog() {
         AtomicReference<Instant> asked = new AtomicReference<>();
-        EventCatalog recording = (from, to) -> {
-            asked.set(from);
-            return Flux.empty();
-        };
+        EventCatalog recording = new RecordingCatalog(asked);
         CalendarTools recordingTools =
-                new CalendarTools(new MyEventsService(recording, NAMES), new EventSummaryToolMapperImpl());
+                new CalendarTools(new MyEventsService(recording, NAMES), new EventCreationService(recording),
+                        new EventSummaryToolMapperImpl());
 
         StepVerifier.create(recordingTools.listMyEvents(FROM, TO))
                 .expectNextCount(1)
@@ -126,6 +188,91 @@ class CalendarToolsTest {
     }
 
     @Test
+    void createEvent_shouldCreateTheEventAndAnswerItBack() {
+        AtomicReference<NewEvent> created = new AtomicReference<>();
+        CalendarTools writing = toolsCreatingInto(created);
+
+        StepVerifier.create(writing.createEvent("Dîner", "2026-10-24T18:30:00Z", "2026-10-24T22:00:00Z",
+                        "Niort", false, "chez Paul"))
+                .assertNext(event -> assertThat(event.title()).isEqualTo("Dîner"))
+                .expectComplete().verify(Duration.ofSeconds(5));
+
+        assertThat(created.get().location()).isEqualTo("Niort");
+        assertThat(created.get().description()).isEqualTo("chez Paul");
+        assertThat(created.get().allDay()).isFalse();
+    }
+
+    @Test
+    void createEvent_shouldAcceptNoEndAndNoDescription() {
+        AtomicReference<NewEvent> created = new AtomicReference<>();
+
+        StepVerifier.create(toolsCreatingInto(created)
+                        .createEvent("Badminton", "2026-10-24T18:30:00Z", null, "Chauray", false, null))
+                .expectNextCount(1)
+                .expectComplete().verify(Duration.ofSeconds(5));
+
+        assertThat(created.get().endDate()).isNull();
+        assertThat(created.get().description()).isNull();
+    }
+
+    @Test
+    void createEvent_shouldSnapAnAllDayEventToWholeDays() {
+        AtomicReference<NewEvent> created = new AtomicReference<>();
+
+        StepVerifier.create(toolsCreatingInto(created)
+                        .createEvent("Vacances", "2026-10-24T18:30:00Z", null, "Biarritz", true, null))
+                .expectNextCount(1)
+                .expectComplete().verify(Duration.ofSeconds(5));
+
+        assertThat(created.get().startDate()).isEqualTo(Instant.parse("2026-10-24T00:00:00Z"));
+        assertThat(created.get().endDate()).isEqualTo(Instant.parse("2026-10-25T00:00:00Z"));
+    }
+
+    @Test
+    void createEvent_shouldTreatAMissingAllDayAsATimedEvent() {
+        AtomicReference<NewEvent> created = new AtomicReference<>();
+
+        StepVerifier.create(toolsCreatingInto(created)
+                        .createEvent("Dîner", "2026-10-24T18:30:00Z", null, "Niort", null, null))
+                .expectNextCount(1)
+                .expectComplete().verify(Duration.ofSeconds(5));
+
+        assertThat(created.get().allDay()).isFalse();
+    }
+
+    @Test
+    void createEvent_shouldRejectAnUnreadableStart() {
+        StepVerifier.create(toolsCreatingInto(new AtomicReference<>())
+                        .createEvent("Dîner", "vendredi soir", null, "Niort", false, null))
+                .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.TIME_RANGE_UNREADABLE));
+    }
+
+    @Test
+    void createEvent_shouldRejectAnUnreadableEnd() {
+        StepVerifier.create(toolsCreatingInto(new AtomicReference<>())
+                        .createEvent("Dîner", "2026-10-24T18:30:00Z", "22h", "Niort", false, null))
+                .verifyError(BusinessException.class);
+    }
+
+    @Test
+    void createEvent_shouldRejectAMissingPlace() {
+        StepVerifier.create(toolsCreatingInto(new AtomicReference<>())
+                        .createEvent("Dîner", "2026-10-24T18:30:00Z", null, "  ", false, null))
+                .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.LOCATION_REQUIRED));
+    }
+
+    @Test
+    void createEvent_shouldNotCreateAnythingWhileTheMonoIsNotSubscribed() {
+        AtomicReference<NewEvent> created = new AtomicReference<>();
+
+        toolsCreatingInto(created).createEvent("Dîner", "2026-10-24T18:30:00Z", null, "Niort", false, null);
+
+        assertThat(created.get()).isNull();
+    }
+
+    @Test
     void listMyEvents_shouldRejectAnUnreadableDate() {
         StepVerifier.create(tools.listMyEvents("21/10/2026", TO))
                 .verifyErrorSatisfies(error -> assertThat(((BusinessException) error).getErrorCode())
@@ -147,9 +294,10 @@ class CalendarToolsTest {
 
     @Test
     void listMyEvents_shouldPropagateACatalogFailure() {
-        EventCatalog failing = (from, to) -> Flux.error(new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED));
-        CalendarTools failingTools =
-                new CalendarTools(new MyEventsService(failing, NAMES), new EventSummaryToolMapperImpl());
+        EventCatalog failing =
+                new ReadOnlyCatalog(Flux.error(new TechnicalException(TechnicalErrorCode.GATEWAY_REFUSED)));
+        CalendarTools failingTools = new CalendarTools(new MyEventsService(failing, NAMES),
+                new EventCreationService(failing), new EventSummaryToolMapperImpl());
 
         StepVerifier.create(failingTools.listMyEvents(FROM, TO))
                 .verifyErrorSatisfies(error -> assertThat(((TechnicalException) error).getErrorCode())
@@ -160,12 +308,9 @@ class CalendarToolsTest {
     void listMyEvents_shouldNotBlockTheCallingThread() {
         // The tool is a Mono the server subscribes: building it must do no work at all.
         AtomicReference<Boolean> read = new AtomicReference<>(false);
-        EventCatalog catalog = (from, to) -> {
-            read.set(true);
-            return Flux.empty();
-        };
-        CalendarTools lazyTools =
-                new CalendarTools(new MyEventsService(catalog, NAMES), new EventSummaryToolMapperImpl());
+        EventCatalog catalog = new MarkingCatalog(read);
+        CalendarTools lazyTools = new CalendarTools(new MyEventsService(catalog, NAMES),
+                new EventCreationService(catalog), new EventSummaryToolMapperImpl());
 
         lazyTools.listMyEvents(FROM, TO);
 
