@@ -97,8 +97,8 @@ com.calendar.mcp/
 ./mvnw test                                        # 34 unit tests, no Docker needed
 GATEWAY_URL=http://localhost:8081 \
 MCP_PUBLIC_URL=http://localhost:8088 \
-KEYCLOAK_INTERNAL_JWK_SET_URI=http://localhost:8080/realms/wely-realm/protocol/openid-connect/certs \
-KEYCLOAK_ISSUER_URI=http://localhost:8080/realms/wely-realm \
+KEYCLOAK_INTERNAL_JWK_SET_URI=http://localhost:8080/realms/wely-local/protocol/openid-connect/certs \
+KEYCLOAK_ISSUER_URI=http://localhost:8080/realms/wely-local \
   ./mvnw spring-boot:run
 ```
 
