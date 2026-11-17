@@ -24,8 +24,8 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
 @TestPropertySource(properties = {
         "mcp.public-url=http://localhost:8088",
         "gateway.url=http://localhost:18081",
-        "spring.security.oauth2.resourceserver.jwt.issuer-uri=http://localhost:9999/realms/wely-realm",
-        "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost:9999/certs"
+        "spring.security.oauth2.resourceserver.jwt.issuer-uri=http://localhost:9999/",
+        "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost:9999/.well-known/jwks.json"
 })
 class McpApplicationTest {
 
@@ -79,7 +79,7 @@ class McpApplicationTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.resource").isEqualTo("http://localhost:8088")
-                .jsonPath("$.authorization_servers[0]").isEqualTo("http://localhost:9999/realms/wely-realm");
+                .jsonPath("$.authorization_servers[0]").isEqualTo("http://localhost:9999/");
     }
 
     @Test

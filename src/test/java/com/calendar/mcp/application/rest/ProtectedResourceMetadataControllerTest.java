@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProtectedResourceMetadataControllerTest {
 
     private static final String PUBLIC_URL = "https://mcp.wely.dev";
-    private static final String ISSUER = "https://auth.wely.dev/realms/wely-realm";
+    private static final String ISSUER = "https://auth.welylabs.app/";
 
     private final ProtectedResourceMetadataController controller =
             new ProtectedResourceMetadataController(PUBLIC_URL, ISSUER);

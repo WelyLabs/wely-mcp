@@ -21,8 +21,9 @@ experiment can be deleted by deleting one repository.
 
 **No tool takes a user id.** The caller is whoever the request's JWT says, and nothing else:
 
-- this service validates the token as every other service does (`jwk-set-uri` inside the cluster,
-  `issuer-uri` on the public URL);
+- this service validates the token as every other service does: issued by Auth0, whose tenant
+  answers on the custom domain `auth.welylabs.app` (issuer `https://auth.welylabs.app/`, keys at
+  `/.well-known/jwks.json`);
 - `BearerTokenRelay` puts that same token back on the call to the gateway, so the calendar answers
   for the caller and this service needs no identity of its own;
 - with no token in context the exchange **fails** rather than calling the gateway anonymously.
@@ -97,8 +98,8 @@ com.calendar.mcp/
 ./mvnw test                                        # 34 unit tests, no Docker needed
 GATEWAY_URL=http://localhost:8081 \
 MCP_PUBLIC_URL=http://localhost:8088 \
-KEYCLOAK_INTERNAL_JWK_SET_URI=http://localhost:8080/realms/wely-dev/protocol/openid-connect/certs \
-KEYCLOAK_ISSUER_URI=http://localhost:8080/realms/wely-dev \
+OIDC_JWK_SET_URI=https://auth.welylabs.app/.well-known/jwks.json \
+OIDC_ISSUER_URI=https://auth.welylabs.app/ \
   ./mvnw spring-boot:run
 ```
 
@@ -147,14 +148,11 @@ parameters from theirs. A vague description is a bug, not a cosmetic issue.
   resolved one id at a time, four at a time, after deduplicating across the answer and after the
   caps — 50 events, 100 friends. A friend the caller may not read (4xx) stays unnamed; a directory
   that is **down** (5xx) fails the answer rather than passing for "no name".
-- **Identity has not been exercised against a live Keycloak.** The reactive route makes context
+- **Identity has not been exercised against a live Auth0 token.** The reactive route makes context
   propagation natural rather than something to bridge by hand, and the failure mode is loud
   (`MCP-TEC-003`, never an anonymous call) — but a real token has not been through it yet.
-- **Audience is not validated yet.** The property is in place but empty: a real token carries **no
-  `aud` claim at all** (checked 2026-10-23), even though wely-identity's realm export declares an
-  audience mapper on `business-scope` — the live dev realm has drifted from the export. Enabling
-  validation before the claim exists would answer 401 to every call. Order: fix the realm, watch the
-  claim appear in a fresh token, then set `JWT_AUDIENCES`.
+- **Audience comes from the environment.** `JWT_AUDIENCES` names the Auth0 API identifier
+  (`wely-api-<env>`); left empty, the check is off and any authentic token of the tenant passes.
 - **No Testcontainers**, but `McpApplicationTest` boots the whole context and speaks MCP to it over
   the deployed filter chain — which is what the 404 on `/mcp` needed, and what caught an ambiguous
   bean the unit tests could not see.
